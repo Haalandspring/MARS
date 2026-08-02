@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "paper_draft": "2026-07-31",
+  "repository": "https://github.com/Haalandspring/MARS",
+  "outputs": [
+    {
+      "paper_items": ["Figure 1"],
+      "name": "training augmentation examples",
+      "status": "blocked",
+      "missing": ["training arrays", "final montage producer", "case seeds"]
+    },
+    {
+      "paper_items": ["Figure 2"],
+      "name": "training convergence",
+      "status": "blocked",
+      "missing": ["paper checkpoint", "history.csv"]
+    },
+    {
+      "paper_items": ["Table 2", "Figures 3-6"],
+      "name": "synthetic RFI patch benchmark",
+      "status": "blocked",
+      "config": "configs/benchmarks/synthetic_rfi_patches.json",
+      "missing": ["SPECTRALib 0.0.23", "candidate manifest", "source patches", "paper checkpoint", "raw counts"]
+    },
+    {
+      "paper_items": ["Table 3", "Figures 7-11"],
+      "name": "FRB protection and astronomy-loss ablation",
+      "status": "blocked",
+      "config": "configs/benchmarks/frb_protection.json",
+      "missing": ["clean and mixed manifests", "support arrays", "paper/no-astro checkpoints", "raw results"]
+    },
+    {
+      "paper_items": ["Table 4", "Figures 12-13"],
+      "name": "full-filterbank PRESTO comparison",
+      "status": "blocked",
+      "config": "configs/benchmarks/full_filterbank_presto.json",
+      "missing": ["fixed 1000-case manifest", "filterbanks", "Filtool command lock", "candidate matching lock", "result table"]
+    },
+    {
+      "paper_items": ["Tables 5 and 7"],
+      "name": "real GMRT preservation",
+      "status": "blocked-needs-rerun",
+      "missing": ["observation metadata/data", "one final checkpoint", "no-HYS reruns", "table producer"]
+    },
+    {
+      "paper_items": ["Table 6", "Figure 14"],
+      "name": "compute-time comparison",
+      "status": "blocked",
+      "missing": ["common input manifest", "raw repetition timings", "RFDL runner/results", "combined table producer"]
+    },
+    {
+      "paper_items": ["Table 8", "Figures 15-17"],
+      "name": "decoder refinement ablation",
+      "status": "blocked",
+      "missing": ["four checkpoints", "pooled pixel counts", "FRB results", "generated summary"]
+    }
+  ]
+}

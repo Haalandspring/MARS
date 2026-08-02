@@ -1,0 +1,7 @@
+{
+  "experiment_id": "mars-ablation-no-vertical-refinement-v1",
+  "artifact_role": "ablation",
+  "decoder_vertical_refine_enabled": false,
+  "expected_parameters": 216785,
+  "out_dir": "artifacts/checkpoints/ablation-no-vertical-refinement"
+}

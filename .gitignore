@@ -1,0 +1,40 @@
+# Local analysis and editor state
+.codex_work/
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.pytest_tmp/
+pytest-of-*/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+build/
+dist/
+
+# Scientific data and generated results
+*.fil
+*.npy
+*.npz
+*.pt
+*.pth
+*.onnx
+*.engine
+*.jsonl
+results/
+outputs/
+
+# Preserve documentation inside otherwise generated directories
+artifacts/*
+!artifacts/README.md
+data/*
+!data/README.md
+
+# Logs and scheduler output
+*.log
+slurm-*.out

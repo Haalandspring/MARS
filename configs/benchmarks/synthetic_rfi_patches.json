@@ -1,0 +1,20 @@
+{
+  "protocol": "paper-synthetic-rfi-patches",
+  "spectralib_version": "0.0.23",
+  "patch_size": 512,
+  "threshold": 0.5,
+  "hysteresis": false,
+  "sampling_times_us": [128, 256, 512, 1024, 1310],
+  "families": [
+    "persistent_narrowband",
+    "repeating_narrowband",
+    "impulsive_narrowband",
+    "repeating_broadband",
+    "impulsive_broadband",
+    "mixed_rfi"
+  ],
+  "examples_per_family_per_sampling_time": 500,
+  "expected_examples": 15000,
+  "aggregation": "pooled_pixel_counts",
+  "seed_manifest": "data/manifests/synthetic_rfi_patches.jsonl"
+}

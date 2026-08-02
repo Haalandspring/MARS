@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use MARS, please cite the associated paper and this software."
+title: "MARS: Morphology-Aware RFI Segmentation"
+type: software
+version: 0.1.0
+date-released: 2026-08-02
+license: MIT
+repository-code: "https://github.com/Haalandspring/MARS"
+authors:
+  - family-names: Gong
+    given-names: Zhaocheng
+  - family-names: White
+    given-names: Jack
+  - family-names: Roy
+    given-names: Jayanta
+  - family-names: Armour
+    given-names: Wesley

@@ -1,0 +1,20 @@
+{
+  "protocol": "paper-full-filterbank-presto",
+  "sampling_times_us": [128, 256, 512, 1024, 1310],
+  "filterbanks_per_sampling_time": 200,
+  "expected_filterbanks": 1000,
+  "nchans": 4096,
+  "duration_seconds": 300,
+  "nbits": 8,
+  "fch1_mhz": 1550.0,
+  "foff_mhz": -0.292968752,
+  "presto": {
+    "numdms": 1,
+    "zmax": 200,
+    "numharm": 8,
+    "nobary": true,
+    "zerodm": false,
+    "rednoise": true
+  },
+  "seed_manifest": "data/manifests/full_filterbank_presto.jsonl"
+}

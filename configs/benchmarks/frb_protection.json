@@ -1,0 +1,15 @@
+{
+  "protocol": "paper-frb-protection",
+  "patch_size": 512,
+  "threshold": 0.5,
+  "hysteresis": false,
+  "sampling_times_us": [128, 256, 512, 1024, 1310],
+  "dm_pc_cm3": [10, 20, 30, 50, 75, 100, 150, 300, 600, 1000, 1500, 2000, 3000],
+  "peak_snr": [6, 10, 20],
+  "width_ms": [1.31, 5.24, 15.72],
+  "repeats": 16,
+  "conditions": ["clean", "mixed_rfi"],
+  "max_signal_rfi_support_overlap": 0.15,
+  "expected_examples_per_condition": 9360,
+  "seed_manifest": "data/manifests/frb_protection.jsonl"
+}

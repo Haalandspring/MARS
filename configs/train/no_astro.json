@@ -1,0 +1,6 @@
+{
+  "experiment_id": "mars-ablation-no-astro-v1",
+  "artifact_role": "ablation",
+  "lambda_astro": 0.0,
+  "out_dir": "artifacts/checkpoints/ablation-no-astro"
+}
