@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from copy import deepcopy
 import json
 from pathlib import Path
 import sys
+from typing import Any
 
 from .pipeline import CONFIG as PIPELINE_DEFAULTS
 from .pipeline import run_pipeline
@@ -19,17 +21,67 @@ def _json_value(text: str):
         return text
 
 
+def load_pipeline_config(
+    config: str | Path | Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return an isolated pipeline config from defaults, JSON, or overrides."""
+
+    resolved: dict[str, Any] = deepcopy(PIPELINE_DEFAULTS)
+    if config is None:
+        return resolved
+    if isinstance(config, Mapping):
+        override = dict(config)
+    else:
+        config_path = Path(config)
+        with config_path.open(encoding="utf-8") as handle:
+            override = json.load(handle)
+        if not isinstance(override, dict):
+            raise TypeError(f"Pipeline config must be a JSON object: {config_path}")
+    resolved.update(override)
+    return resolved
+
+
+def mitigate_filterbank(
+    input_fil: str | Path,
+    output_fil: str | Path,
+    *,
+    config: str | Path | Mapping[str, Any] | None = None,
+) -> dict[str, float]:
+    """Mitigate one filterbank through the same validated path as the CLI.
+
+    ``config`` may be a JSON path or a mapping of pipeline overrides. Input and
+    output paths are explicit arguments and always take precedence over values
+    stored in that configuration.
+    """
+
+    resolved = load_pipeline_config(config)
+    resolved["input_fil"] = str(input_fil)
+    resolved["output_fil"] = str(output_fil)
+    validate_config(resolved)
+    return run_pipeline(resolved)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Apply the paper-aligned MARS mask-guided mitigation pipeline.",
     )
     parser.add_argument("--config", type=Path, help="Optional JSON config override.")
-    parser.add_argument("--input-fil", type=Path, required=True)
-    parser.add_argument("--output-fil", type=Path, required=True)
+    parser.add_argument("--input-fil", type=Path)
+    parser.add_argument("--output-fil", type=Path)
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--tensorrt-engine", type=Path)
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--threshold", type=float)
+    parser.add_argument(
+        "--deterministic-inference",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Use deterministic PyTorch/cuDNN algorithms for reproducible science "
+            "outputs; disable for the historical throughput benchmark."
+        ),
+    )
+    parser.add_argument("--inference-seed", type=int)
     parser.add_argument(
         "--hysteresis",
         action=argparse.BooleanOptionalAction,
@@ -68,16 +120,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def resolve_config(args: argparse.Namespace) -> dict:
-    config = deepcopy(PIPELINE_DEFAULTS)
-    if args.config is not None:
-        with args.config.open(encoding="utf-8") as handle:
-            override = json.load(handle)
-        if not isinstance(override, dict):
-            raise TypeError(f"Pipeline config must be a JSON object: {args.config}")
-        config.update(override)
+    config = load_pipeline_config(args.config)
 
-    config["input_fil"] = str(args.input_fil)
-    config["output_fil"] = str(args.output_fil)
+    if args.input_fil is not None:
+        config["input_fil"] = str(args.input_fil)
+    if args.output_fil is not None:
+        config["output_fil"] = str(args.output_fil)
     if args.checkpoint is not None:
         config["checkpoint"] = str(args.checkpoint)
     if args.tensorrt_engine is not None:
@@ -86,6 +134,10 @@ def resolve_config(args: argparse.Namespace) -> dict:
         config["batch_size"] = int(args.batch_size)
     if args.threshold is not None:
         config["threshold"] = float(args.threshold)
+    if args.deterministic_inference is not None:
+        config["deterministic_inference"] = bool(args.deterministic_inference)
+    if args.inference_seed is not None:
+        config["inference_seed"] = int(args.inference_seed)
     if args.hysteresis is not None:
         config["hys_enabled"] = bool(args.hysteresis)
     if args.zdot is not None:
@@ -108,6 +160,8 @@ def resolve_config(args: argparse.Namespace) -> dict:
 
 
 def validate_config(config: dict) -> None:
+    if not config.get("input_fil") or not config.get("output_fil"):
+        raise ValueError("--input-fil and --output-fil are required for mitigation.")
     input_path = Path(config["input_fil"])
     output_path = Path(config["output_fil"])
     if input_path.resolve() == output_path.resolve():

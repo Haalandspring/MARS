@@ -6,6 +6,7 @@ import ast
 import json
 import re
 from pathlib import Path
+import tomllib
 
 from mars_rfi.config import CONFIG as SOURCE_TRAIN_CONFIG
 from mars_rfi.provenance import (
@@ -48,6 +49,17 @@ def _pipeline_source_defaults(keys: tuple[str, ...]) -> dict:
             and value_node.value.id == "PAPER_TRAINING_CONFIG"
         ):
             selected[key] = SOURCE_TRAIN_CONFIG[ast.literal_eval(value_node.slice)]
+        elif isinstance(value_node, ast.Name):
+            constant_node = next(
+                node.value
+                for node in module.body
+                if isinstance(node, ast.Assign)
+                and any(
+                    isinstance(target, ast.Name) and target.id == value_node.id
+                    for target in node.targets
+                )
+            )
+            selected[key] = ast.literal_eval(constant_node)
         else:
             selected[key] = ast.literal_eval(value_node)
     return selected
@@ -109,7 +121,7 @@ def _model_parameter_count(config: dict) -> int:
 
 
 def test_paper_config_has_the_reported_parameter_count() -> None:
-    config = json.loads((ROOT / "configs/train/paper.json").read_text(encoding="utf-8"))
+    config = json.loads((ROOT / "configs/train/mars.json").read_text(encoding="utf-8"))
 
     assert config["model"] == "trt_shape_unet"
     assert config["decoder_horizontal_refine_enabled"] is True
@@ -125,63 +137,17 @@ def test_paper_config_has_the_reported_parameter_count() -> None:
 
 def test_repository_json_files_are_valid() -> None:
     paths = sorted((ROOT / "configs").rglob("*.json"))
-    paths.append(ROOT / "reproduction/paper-manifest.json")
 
     for path in paths:
         json.loads(path.read_text(encoding="utf-8"))
 
 
-def test_decoder_ablation_parameter_guards_are_locked() -> None:
-    config_dir = ROOT / "configs/train"
-    expected = {
-        "paper.json": 270_769,
-        "no_horizontal_refinement.json": 216_785,
-        "no_vertical_refinement.json": 216_785,
-        "no_decoder_refinement.json": 162_801,
-    }
-
-    for name, parameter_count in expected.items():
-        delta = json.loads((config_dir / name).read_text(encoding="utf-8"))
-        config = {**SOURCE_TRAIN_CONFIG, **delta}
-        assert config["expected_parameters"] == parameter_count
-        assert _model_parameter_count(config) == parameter_count
-
-    horizontal = json.loads(
-        (config_dir / "no_horizontal_refinement.json").read_text(encoding="utf-8")
-    )
-    vertical = json.loads(
-        (config_dir / "no_vertical_refinement.json").read_text(encoding="utf-8")
-    )
-    neither = json.loads(
-        (config_dir / "no_decoder_refinement.json").read_text(encoding="utf-8")
-    )
-    assert horizontal["decoder_horizontal_refine_enabled"] is False
-    assert vertical["decoder_vertical_refine_enabled"] is False
-    assert neither["decoder_horizontal_refine_enabled"] is False
-    assert neither["decoder_vertical_refine_enabled"] is False
-    for delta in (horizontal, vertical, neither):
-        assert delta["artifact_role"] == "ablation"
-        assert delta["experiment_id"] != PAPER_EXPERIMENT_ID
-
-
-def test_loss_ablation_has_a_distinct_training_identity() -> None:
-    delta = json.loads(
-        (ROOT / "configs/train/no_astro.json").read_text(encoding="utf-8")
-    )
-    config = {**SOURCE_TRAIN_CONFIG, **delta}
-
-    assert _model_parameter_count(config) == 270_769
-    assert training_fingerprint(config) != SOURCE_TRAIN_CONFIG["training_fingerprint"]
-    assert config["artifact_role"] == "ablation"
-    assert config["experiment_id"] != PAPER_EXPERIMENT_ID
-
-
 def test_train_and_pipeline_paper_contracts_agree() -> None:
     train_json = json.loads(
-        (ROOT / "configs/train/paper.json").read_text(encoding="utf-8")
+        (ROOT / "configs/train/mars.json").read_text(encoding="utf-8")
     )
     pipeline_json = json.loads(
-        (ROOT / "configs/pipeline/paper.json").read_text(encoding="utf-8")
+        (ROOT / "configs/pipeline/mars.json").read_text(encoding="utf-8")
     )
     shared_keys = (
         "experiment_id",
@@ -212,17 +178,44 @@ def test_train_and_pipeline_paper_contracts_agree() -> None:
             pipeline_source_value = list(pipeline_source_value)
         assert pipeline_source_value == source_value
     pipeline_safety = _pipeline_source_defaults(
-        ("allow_unverified_artifacts", "tensorrt_verification_max_diff")
+        (
+            "allow_unverified_artifacts",
+            "tensorrt_verification_max_diff",
+            "minimum_supported_channels",
+        )
     )
     assert pipeline_json["allow_unverified_artifacts"] is False
     assert pipeline_safety["allow_unverified_artifacts"] is False
     assert pipeline_json["tensorrt_verification_max_diff"] == 0.02
     assert pipeline_safety["tensorrt_verification_max_diff"] == 0.02
+    assert pipeline_json["minimum_supported_channels"] == 512
+    assert pipeline_safety["minimum_supported_channels"] == 512
+
+
+def test_historical_pipeline_profile_has_a_separate_locked_identity() -> None:
+    config = json.loads(
+        (ROOT / "configs/pipeline/mitigation.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert config["experiment_id"] == "mars-paper-historical-2026-06-17"
+    assert config["artifact_role"] == "historical-paper"
+    assert config["training_fingerprint"] == (
+        "b5e7bff877cc1f160eb952b4e41e664f74ff12f5a552679f511cfaf394fbf265"
+    )
+    assert config["minimum_supported_channels"] == 512
+    assert config["allow_unverified_artifacts"] is False
 
 
 def test_local_markdown_links_resolve() -> None:
     link_pattern = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
-    markdown_paths = [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md"))]
+    markdown_paths = [
+        ROOT / "README.md",
+        ROOT / "artifacts/README.md",
+        ROOT / "data/README.md",
+        *sorted((ROOT / "docs").glob("*.md")),
+    ]
     missing: list[str] = []
 
     for markdown_path in markdown_paths:
@@ -235,3 +228,71 @@ def test_local_markdown_links_resolve() -> None:
                 missing.append(f"{markdown_path.relative_to(ROOT)} -> {target}")
 
     assert not missing, "Broken local links:\n" + "\n".join(missing)
+
+
+def test_search_namespace_is_separated_from_core() -> None:
+    package_root = ROOT / "src/mars_rfi"
+    search_only = {
+        "presto",
+        "presto_candidates",
+    }
+    core_modules = {path.stem for path in package_root.glob("*.py")}
+    search_modules = {
+        path.stem for path in (package_root / "search").glob("*.py")
+    }
+
+    assert core_modules.isdisjoint(search_only)
+    assert search_only <= search_modules
+
+    for source_path in package_root.glob("*.py"):
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        imported = {
+            node.module or ""
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+        }
+        assert not any("search" in module for module in imported), source_path
+
+
+def test_console_scripts_make_the_runtime_boundary_explicit() -> None:
+    with (ROOT / "pyproject.toml").open("rb") as handle:
+        project = tomllib.load(handle)["project"]
+    scripts = project["scripts"]
+
+    assert {
+        "mars-train",
+        "mars-mitigate",
+        "mars-export-tensorrt",
+        "mars-diagnostics",
+        "mars-search-presto",
+        "mars-search-match",
+    } <= scripts.keys()
+    for name, target in scripts.items():
+        assert ".paper_validation." not in target
+        assert ".migration." not in target
+        if ".search." in target:
+            assert name.startswith("mars-search-")
+
+    assert not any(name.startswith("mars-validate-") for name in scripts)
+    assert not any(name.startswith("mars-reproduce-") for name in scripts)
+    assert not any(name.startswith("mars-migrate-") for name in scripts)
+    assert "mars-presto" not in scripts
+
+
+def test_private_validation_and_large_data_are_ignored() -> None:
+    rules = set((ROOT / ".gitignore").read_text(encoding="utf-8").splitlines())
+    assert {
+        "/paper_validation/",
+        "/src/mars_rfi/paper_validation/",
+        "/tests/paper_validation/",
+        "/src/mars_rfi/migration/",
+        "/tests/migration/",
+        "data/*",
+        "results/",
+        "outputs/",
+        "search_outputs/",
+        "*.fil",
+        "*.npy",
+        "*.pt",
+        "*.engine",
+    } <= rules

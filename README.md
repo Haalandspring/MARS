@@ -1,28 +1,90 @@
 # MARS
 
-MARS is a lightweight **M**orphology-**A**ware **R**FI **S**egmentation network
-for mask-guided mitigation in radio-astronomy filterbank data. The neural model
-predicts a full-resolution RFI mask; a separate GPU pipeline applies that mask,
-removes the baseline, and writes an 8-bit cleaned filterbank.
+MARS is a **M**orphology-**A**ware **R**FI **S**egmentation system for
+mask-guided mitigation of radio-astronomy filterbank data. Its primary public
+interface is `mars-mitigate`: read an 8-bit SIGPROC filterbank, predict an RFI
+mask, replace contaminated samples, remove the baseline, rescale the data, and
+write a cleaned filterbank with a validated header/data contract.
 
-This repository is a paper-aligned extraction from the historical
-`Physics-Informed-Latent-Diffusion` development tree. The diffusion experiments,
-versioned scratch directories, personal paths, and large generated data are not
-part of the public MARS implementation.
+The public repository is centered on the reusable mitigation pipeline.
+[`search/`](search/README.md) provides an optional real-observation workflow for
+mitigation followed by PRESTO and candidate matching. Article-validation tools,
+benchmark outputs, datasets, checkpoints, and generated filterbanks are kept out
+of the public source tree.
 
-> **Reproducibility status:** the source now contains one unambiguous paper
-> configuration and guards the reported 270,769-parameter architecture. The
-> audited development tree did **not** contain the final checkpoint, training
-> arrays, fixed-seed benchmark manifests, TensorRT engine, or paper result
-> tables. Exact numerical reproduction remains blocked until those artifacts are
-> published. See [reproducibility status](docs/reproducibility.md) and the
-> [paper/code audit](docs/paper-code-differences.md).
+## Quick start
 
-## Architecture
+Install the package and the mitigation I/O dependency from the repository root:
 
-The paper model uses channels `(8, 16, 32, 64)`, additive U-Net skips, a
-`3x3 / 1x9 / 9x1` morphology-aware bottleneck, and horizontal plus vertical
-refinement at all three decoder scales.
+```bash
+python -m pip install -e ".[mitigation]"
+```
+
+Obtain the released MARS checkpoint separately and place it at the path selected
+by `configs/pipeline/mitigation.json`. Model binaries are intentionally not
+stored in Git. Then mitigate an observation with deterministic PyTorch
+inference:
+
+```bash
+CUBLAS_WORKSPACE_CONFIG=:4096:8 mars-mitigate \
+  --config configs/pipeline/mitigation.json \
+  --input-fil observation.fil \
+  --output-fil outputs/observation_mars.fil
+```
+
+The same validated path is available as a Python API:
+
+```python
+from mars_rfi import mitigate_filterbank
+
+timings = mitigate_filterbank(
+    "observation.fil",
+    "outputs/observation_mars.fil",
+    config="configs/pipeline/mitigation.json",
+)
+```
+
+The input and output paths must differ. The current runtime intentionally
+supports only:
+
+- 8-bit SIGPROC filterbanks;
+- at least 512 frequency channels; and
+- inputs that fit the current GPU-resident working set.
+
+`C < 512` is rejected explicitly and cannot be enabled by lowering a config
+value.
+
+## Mitigation data flow
+
+```mermaid
+flowchart LR
+    A[8-bit SIGPROC filterbank] --> B[segment statistics and normalization]
+    B --> C[512 x 512 patches]
+    C --> D[MARS mask inference]
+    D --> E[mask reconstruction]
+    A --> F[science-data branch]
+    E --> G[mask-guided replacement]
+    F --> G
+    G --> H[baseline removal]
+    H --> I[block rescale to uint8]
+    I --> J[cleaned SIGPROC filterbank]
+```
+
+The neural-network mask and science-data branch are kept separate: robust
+normalization is used to expose RFI morphology to the model, while replacement
+and output scaling operate on the science data. Main mitigation defaults use a
+0.5 sigmoid threshold, zero replacement, masked output value 128, and no
+hysteresis or `zdot` unless a configuration enables them explicitly.
+
+The implementation is segment-wise but not yet out-of-core: it reads the full
+observation and keeps its working arrays on the GPU. See
+[`docs/limitations.md`](docs/limitations.md) for the operational boundaries.
+
+## Model
+
+The default MARS network is a lightweight additive U-Net with channels
+`(8, 16, 32, 64)`. It combines `3x3`, `1x9`, and `9x1` bottleneck context with
+horizontal and vertical refinement at all three decoder scales.
 
 ```mermaid
 flowchart LR
@@ -30,136 +92,143 @@ flowchart LR
     E0 --> E1[Stride 2 / 16]
     E1 --> E2[Stride 2 / 32]
     E2 --> E3[Stride 2 / 64]
-    E3 --> B{Parallel context}
+    E3 --> B{parallel context}
     B --> L[3 x 3]
     B --> H[1 x 9]
     B --> V[9 x 1]
-    L --> F[Concat + 1 x 1 + residual]
+    L --> F[concat + 1 x 1 + residual]
     H --> F
     V --> F
-    F --> D2[Up2 + add skip + H/V refine]
-    D2 --> D1[Up1 + add skip + H/V refine]
-    D1 --> D0[Up0 + add skip + H/V refine]
+    F --> D2[up2 + skip + H/V refine]
+    D2 --> D1[up1 + skip + H/V refine]
+    D1 --> D0[up0 + skip + H/V refine]
     D0 --> Z[1 x 512 x 512 logits]
 ```
 
-`build_paper_model()` and the training/pipeline configs assert **270,769
-trainable parameters** so a no-refinement ablation cannot silently be presented
-as the paper model. Checkpoints also carry an experiment ID and SHA-256 training-
-config fingerprint, which distinguishes loss-only ablations with the same
-topology and parameter count.
+`build_paper_model()` and the locked configs assert 270,769 trainable
+parameters. Checkpoints carry an experiment ID, artifact role, and canonical
+training fingerprint so a topology-identical ablation cannot be loaded as the
+selected mitigation model.
 
-## Install
+The expected artifact layout is documented in
+[`artifacts/README.md`](artifacts/README.md). A typical local installation uses:
 
-Python 3.10 or newer is required. Install only the part you need:
-
-```bash
-python -m pip install -e .
-python -m pip install -e ".[filterbank]"   # SIGPROC filterbank I/O
-python -m pip install -e ".[plots,test]"  # figures and tests
+```text
+artifacts/checkpoints/mars-paper-historical/
+  best_f1.pt             # MARS checkpoint used by mars-mitigate
 ```
 
-TensorRT is intentionally not a portable base dependency. The audited
-development environment used Python 3.13, PyTorch 2.11, CUDA 13, and TensorRT
-10.15; the paper itself does not specify these versions. The focused version
-list is in
-[`environments/requirements-paper.txt`](environments/requirements-paper.txt).
+## Core commands
 
-## Train the paper model
+| Command | Purpose |
+| --- | --- |
+| `mars-mitigate` | Apply mask-guided RFI mitigation to an 8-bit `.fil` file. |
+| `mars-train` | Train the MARS segmentation model from prepared patch/mask arrays. |
+| `mars-export-tensorrt` | Build and numerically verify an ONNX/TensorRT deployment artifact. |
+| `mars-diagnostics` | Inspect preprocessing, masks, and residual patches for one observation. |
 
-Prepare the four arrays described in [`data/README.md`](data/README.md), then:
+Advanced mitigation values can be supplied by JSON config or with `--set
+KEY=JSON`. Use `mars-mitigate --help` for the full public CLI. An explicitly
+requested checkpoint or TensorRT engine is never silently substituted.
+
+### Deterministic science inference
+
+The science configurations set `deterministic_inference=true` and seed 1234.
+They disable cuDNN autotuning, require deterministic PyTorch algorithms, and
+use a deterministic value-only CUDA median implementation. Set
+`CUBLAS_WORKSPACE_CONFIG=:4096:8` before starting Python, as in the quick-start
+command.
+
+Byte-identical output is only promised for the same input, checkpoint,
+configuration, GPU, and PyTorch/CUDA/cuDNN stack. PyTorch flags do not control
+the internal kernels of a TensorRT engine. Performance-oriented runs can disable
+strict determinism explicitly.
+
+## Train a model
+
+Training arrays are described in [`data/README.md`](data/README.md). After they
+are available at the configured paths:
 
 ```bash
-mars-train --config configs/train/paper.json
+mars-train --config configs/train/mars.json
 ```
 
-Controlled loss/architecture ablations use explicit delta configs:
+The training command validates architecture, loss, data, and artifact identity
+fields before writing a checkpoint.
+
+## TensorRT deployment
+
+TensorRT is an optional, machine-specific deployment backend. Install the ONNX
+dependencies and build on the target GPU/software stack:
 
 ```bash
-mars-train --config configs/train/no_astro.json
-mars-train --config configs/train/no_horizontal_refinement.json
-mars-train --config configs/train/no_vertical_refinement.json
-mars-train --config configs/train/no_decoder_refinement.json
-```
+python -m pip install -e ".[mitigation,onnx]"
 
-Each delta has a distinct experiment identity and output directory. Modifying a
-paper-locked model/loss/training field via CLI is rejected until it is expressed
-as an explicit non-paper config, preventing an ablation from overwriting the
-paper artifact directory.
-
-Training defaults match the draft paper: seed 1234, 50 epochs, batch size 64,
-AdamW with learning rate `1e-3` and weight decay `1e-4`, positive-class weight
-3, and unit Dice/astronomy-loss coefficients.
-
-## Build TensorRT and mitigate a filterbank
-
-Export a trained checkpoint on the target CUDA/TensorRT system:
-
-```bash
 mars-export-tensorrt \
-  --checkpoint artifacts/checkpoints/mars-paper/best_f1.pt \
+  --checkpoint artifacts/checkpoints/mars-paper-historical/best_f1.pt \
   --batch-size 64 --precision fp16 --io-dtype fp16
 ```
 
-The exporter writes a sidecar JSON containing checkpoint/engine SHA-256 hashes,
-the model config and fingerprint, numerical PyTorch/TensorRT verification, and
-the GPU/software build environment. Paper inference enforces a non-disableable
-maximum sigmoid-difference tolerance of 0.02. Run mitigation with either the
-PyTorch checkpoint or a locally built engine:
+The exporter writes a sidecar containing checkpoint and engine SHA-256 values,
+the complete model identity, the build environment, and numerical
+PyTorch/TensorRT verification. A missing, mismatched, or unverified sidecar is
+an error for validated artifacts.
+
+## Diagnostics
+
+Patch-level visual diagnostics are optional and do not participate in the
+mitigation output path:
 
 ```bash
-mars-mitigate \
-  --config configs/pipeline/paper.json \
+python -m pip install -e ".[mitigation,plots]"
+
+mars-diagnostics \
   --input-fil observation.fil \
-  --output-fil outputs/observation_mars.fil \
-  --checkpoint artifacts/checkpoints/mars-paper/best_f1.pt
+  --checkpoint artifacts/checkpoints/mars-paper-historical/best_f1.pt \
+  --output-dir outputs/diagnostics
 ```
 
-Main-text results use threshold 0.5 with hysteresis disabled. A repository-
-defined, non-paper diagnostic hysteresis profile is isolated in
-[`configs/pipeline/diagnostic_hysteresis.json`](configs/pipeline/diagnostic_hysteresis.json).
-The paper is ambiguous about which full-filterbank results enabled post-
-replacement `zdot`, so the public default is off and every run must opt in with
-`--zdot`.
+## Optional real-data search
 
-The current writer safely accepts only 8-bit SIGPROC input because it preserves
-the input header while writing uint8 output. It fails explicitly for other bit
-depths instead of producing a header/data mismatch.
-
-TensorRT selection is strict: a missing engine, missing sidecar, identity
-mismatch, or unverified engine is an error rather than a silent PyTorch
-fallback. `--set allow_unverified_artifacts=true` exists only as an explicit
-unsafe migration/debug escape hatch and must not be used for reported results.
-
-## PRESTO search
-
-The paper synthetic protocol uses red-noise removal, `zmax=200`, and
-`numharm=8`:
-
-```bash
-mars-presto --fil outputs/observation_mars.fil --dm 100 \
-  --no-container --rednoise --zmax 200 --numharm 8
-```
-
-Use `--sif IMAGE.sif` and one or more `--bind HOST:CONTAINER` arguments for an
-Apptainer/Singularity environment. The two real-GMRT cases use source-specific
-DM, `zmax=0`, and harmonic settings listed in the
-[paper specification](docs/paper-specification.md).
-
-## Repository map
+For an observation that needs RFI mitigation and a pulsar search, start here:
 
 ```text
-src/mars_rfi/       installable model, loss, augmentation, training and pipeline
-configs/            paper-locked training, inference and benchmark protocols
-reproduction/       experiment manifest and dataset-level evaluation utilities
-tests/              architecture, loss, augmentation and patch-roundtrip tests
-docs/               paper specification, audit, limitations and reproduction status
-data/                expected data contract (large files excluded)
-artifacts/           expected checkpoint/export layout (binaries excluded)
+search/
 ```
 
-The exact paper-facing method and experiment counts are recorded in
-[`docs/paper-specification.md`](docs/paper-specification.md).
+It provides three descriptive scripts: `mitigate_rfi.py`, `run_presto.py`, and
+`match_candidates.py`. The reusable implementations remain in `src/mars_rfi/`
+so command-line and Python users run the same code. See the
+[`search` guide](search/README.md) for usage.
+
+## Repository layout
+
+The enforced dependency rule and module ownership are described in
+[`docs/code-organization.md`](docs/code-organization.md).
+
+```text
+search/                         easy real-observation entry points
+src/mars_rfi/                   reusable model, training and mitigation code
+src/mars_rfi/search/            PRESTO and candidate-matching implementation
+configs/                        normal training and mitigation profiles
+tests/search/                   operational-search tests
+data/                           local input contract; generated data are ignored
+artifacts/                      checkpoints and local TensorRT artifacts
+docs/                           code organization and runtime limitations
+```
+
+## Development
+
+```bash
+python -m pip install -e ".[mitigation,plots,test]"
+pytest -q
+ruff check .
+```
+
+The repository deliberately does not commit generated `.fil`, `.npy`, `.pt`,
+ONNX, TensorRT binaries, datasets, benchmark outputs, or private
+article-validation code. Model artifacts should be distributed separately with
+hashes, producer versions, and access terms.
 
 ## Citation and license
 

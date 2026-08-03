@@ -2,7 +2,7 @@
 
 Run from the repository root:
 
-    mars-train --config configs/train/paper.json
+    mars-train --config configs/train/mars.json
 """
 
 from __future__ import annotations

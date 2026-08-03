@@ -1,28 +1,41 @@
 # Model artifacts
 
-The paper checkpoint, ONNX graph, TensorRT engine, and training history were not
-present in the audited development repository, so this source release does not
-pretend to ship them.
+Model checkpoints, ONNX graphs, TensorRT engines, and training histories are
+generated or separately distributed artifacts. They are intentionally ignored
+by Git and are not part of the public source repository.
 
-Expected local layout:
+The default mitigation profile expects this local layout:
 
 ```text
 artifacts/
   checkpoints/
-    mars-paper/
+    mars-paper-historical/
       best_f1.pt
-      history.csv
-      config.json
   onnx/
   tensorrt/
 ```
 
-`best_f1.pt` must embed the full resolved paper configuration, experiment ID
-`mars-paper-2026-07-31`, matching training fingerprint, and 270,769 trainable
-parameters. TensorRT engines are hardware- and version-bound; build one locally
-with `mars-export-tensorrt` rather than treating an engine as a portable model
-file. The paper pipeline rejects engines without a matching, successfully
-verified sidecar.
+Place the released checkpoint at the path configured by
+`configs/pipeline/mitigation.json`, or pass another compatible checkpoint
+explicitly to `mars-mitigate`. A checkpoint must match the configured MARS
+architecture and artifact identity; the runtime rejects incompatible metadata
+instead of silently loading a different model.
 
-Before a reproducibility release, add checkpoint/history download URLs and
-SHA-256 hashes to this file. See `docs/reproducibility.md`.
+TensorRT engines are tied to the GPU architecture and TensorRT/CUDA software
+stack. Build and verify an engine on the deployment system:
+
+```bash
+mars-export-tensorrt \
+  --checkpoint artifacts/checkpoints/mars-paper-historical/best_f1.pt \
+  --batch-size 64 \
+  --precision fp16 \
+  --io-dtype fp16
+```
+
+The exporter writes a sidecar containing the checkpoint and engine hashes,
+model identity, build environment, and numerical verification result. Use an
+engine in the mitigation pipeline only when that verification passed.
+
+Public model releases should provide a stable download location, SHA-256 hash,
+license/access terms, and the compatible MARS version. Local copies remain
+ignored even after they are placed under `artifacts/`.

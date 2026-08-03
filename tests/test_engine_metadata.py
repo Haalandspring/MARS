@@ -10,7 +10,11 @@ from pathlib import Path
 import pytest
 
 from mars_rfi.config import CONFIG
-from mars_rfi.provenance import training_fingerprint, validate_engine_metadata
+from mars_rfi.provenance import (
+    HISTORICAL_PAPER_ARTIFACT_ROLE,
+    training_fingerprint,
+    validate_engine_metadata,
+)
 
 
 def _paper_runtime_config() -> dict:
@@ -22,6 +26,21 @@ def _paper_runtime_config() -> dict:
             "tensorrt_verification_max_diff": 0.02,
         }
     )
+    return config
+
+
+def _historical_runtime_config() -> dict:
+    config = _paper_runtime_config()
+    config.update(
+        {
+            "experiment_id": "mars-paper-historical-2026-06-17",
+            "artifact_role": HISTORICAL_PAPER_ARTIFACT_ROLE,
+        }
+    )
+    config["augmentation"][
+        "implementation_profile"
+    ] = "single-extra-family-draw-max-two-v1"
+    config["training_fingerprint"] = training_fingerprint(config)
     return config
 
 
@@ -57,6 +76,15 @@ def test_valid_paper_engine_sidecar_passes(tmp_path: Path) -> None:
     engine_path, _ = _write_sidecar(tmp_path)
 
     assert validate_engine_metadata(engine_path, _paper_runtime_config()) == []
+
+
+def test_valid_historical_paper_engine_sidecar_passes_strict_validation(
+    tmp_path: Path,
+) -> None:
+    runtime = _historical_runtime_config()
+    engine_path, _ = _write_sidecar(tmp_path, model_config=runtime)
+
+    assert validate_engine_metadata(engine_path, runtime) == []
 
 
 def test_missing_sidecar_and_missing_engine_hash_fail_closed(tmp_path: Path) -> None:

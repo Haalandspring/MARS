@@ -29,6 +29,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mitigation = [
+  "sigpyproc @ git+https://github.com/FRBs/sigpyproc3@b31ef20fa13bb97e2caa244f65a4dfa377d6945a",
+]
+# Compatibility alias for installations that used the pre-refactor extra.
 filterbank = [
   "sigpyproc @ git+https://github.com/FRBs/sigpyproc3@b31ef20fa13bb97e2caa244f65a4dfa377d6945a",
 ]
@@ -40,14 +44,22 @@ onnx = ["onnx>=1.17", "onnxscript>=0.2"]
 Repository = "https://github.com/Haalandspring/MARS"
 
 [project.scripts]
+# Core MARS lifecycle.
 mars-train = "mars_rfi.training:main"
 mars-mitigate = "mars_rfi.mitigate:main"
 mars-export-tensorrt = "mars_rfi.export_tensorrt:main"
-mars-presto = "mars_rfi.presto:main"
 mars-diagnostics = "mars_rfi.diagnostics:main"
+
+# Operational observation search.
+mars-search-presto = "mars_rfi.search.presto:main"
+mars-search-match = "mars_rfi.search.presto_candidates:main"
+
+[tool.setuptools]
+include-package-data = false
 
 [tool.setuptools.packages.find]
 where = ["src"]
+exclude = ["mars_rfi.paper_validation*", "mars_rfi.migration*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -9,9 +9,13 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("sigpyproc")
 
 from mars_rfi.pipeline import (  # noqa: E402
+    CONFIG,
+    MINIMUM_SUPPORTED_CHANNELS,
     reconstruct_segment_mask,
+    run_pipeline,
     split_segment_to_patches,
 )
+import mars_rfi.pipeline as pipeline_module  # noqa: E402
 
 
 PATCH_SIZE = 512
@@ -66,14 +70,52 @@ def test_split_reconstruct_non_multiple_channels_covers_frequency_tail() -> None
     assert reconstructed[-1, -1]
 
 
-def test_split_reconstruct_fewer_than_512_channels() -> None:
-    segment = _pattern(256, 3 * PATCH_SIZE + 19)
+class _Header:
+    nsamples = 1
+    tsamp = 0.001
 
-    patches, meta = split_segment_to_patches(segment, PATCH_SIZE)
-    reconstructed = reconstruct_segment_mask(patches.squeeze(1), meta, PATCH_SIZE)
+    def __init__(self, nchans: int):
+        self.nchans = nchans
 
-    assert patches.shape == (2, 1, PATCH_SIZE, PATCH_SIZE)
-    assert meta["small_channel_packing"] is True
-    assert meta["time_blocks_per_patch"] == 2
-    assert meta["patch_count"] == 2
-    torch.testing.assert_close(reconstructed, segment[:, : 3 * PATCH_SIZE])
+
+def _reader_with_channels(nchans: int):
+    class _Reader:
+        def __init__(self, _path: str):
+            self.header = _Header(nchans)
+
+    return _Reader
+
+
+def test_pipeline_rejects_fewer_than_512_channels_before_reading_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(pipeline_module, "FilReader", _reader_with_channels(511))
+    cfg = {
+        "input_fil": "input.fil",
+        "output_fil": "output.fil",
+        "minimum_supported_channels": MINIMUM_SUPPORTED_CHANNELS,
+    }
+
+    with pytest.raises(NotImplementedError, match=r"C >= 512.*C=511"):
+        run_pipeline(cfg)
+
+
+def test_pipeline_channel_boundary_cannot_be_lowered_by_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(pipeline_module, "FilReader", _reader_with_channels(512))
+    cfg = {
+        "input_fil": "input.fil",
+        "output_fil": "output.fil",
+        "minimum_supported_channels": 256,
+    }
+
+    with pytest.raises(ValueError, match=r"cannot be lowered.*C=512"):
+        run_pipeline(cfg)
+
+
+def test_default_pipeline_contract_starts_at_512_channels() -> None:
+    assert MINIMUM_SUPPORTED_CHANNELS == PATCH_SIZE
+    assert CONFIG["minimum_supported_channels"] == PATCH_SIZE

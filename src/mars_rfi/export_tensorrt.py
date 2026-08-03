@@ -39,7 +39,7 @@ import torch
 from .config import CONFIG as TRAIN_CONFIG
 from .model import build_model, count_parameters
 from .provenance import (
-    PAPER_ARTIFACT_ROLE,
+    STRICT_TENSORRT_ARTIFACT_ROLES,
     PAPER_TENSORRT_MAX_DIFF,
     validate_training_identity,
 )
@@ -86,6 +86,11 @@ CONFIG = {
     # Verification / debug.
     "keep_onnx": False,
     "skip_verify": False,
+    # Diagnostic-only escape hatch: still execute verification and record the
+    # measured failure in the sidecar instead of presenting the engine as
+    # verified. Strict runtime profiles continue to reject that sidecar unless
+    # their caller explicitly opts into unverified diagnostic execution.
+    "record_verification_failure": False,
     "verify_batch_size": 4,
     "verify_max_diff": 0.02,
 }
@@ -426,7 +431,14 @@ def verify_engine(engine_path: Path, model: torch.nn.Module, args, device: torch
 
     input_dtype = _trt_dtype_to_torch(engine.get_tensor_dtype("input"))
     output_dtype = _trt_dtype_to_torch(engine.get_tensor_dtype("output"))
-    x = torch.randn(batch, 1, patch, patch, device=device, dtype=input_dtype)
+    verification_seed = 1234
+    generator = torch.Generator(device=device)
+    generator.manual_seed(verification_seed)
+    # MARS receives tanh-compressed patches, so verification should exercise
+    # the bounded deployment domain deterministically instead of drawing an
+    # unbounded, run-dependent Gaussian tensor.
+    x = torch.empty(batch, 1, patch, patch, device=device, dtype=input_dtype)
+    x.uniform_(-0.999, 0.999, generator=generator)
     y_trt = torch.empty(batch, 1, patch, patch, device=device, dtype=output_dtype)
     print(f"  TensorRT I/O dtype: input={input_dtype}, output={output_dtype}")
 
@@ -448,16 +460,27 @@ def verify_engine(engine_path: Path, model: torch.nn.Module, args, device: torch
     mean_diff = float(prob_diff.mean().item())
     print(f"  sigmoid max abs diff:  {max_diff:.6f}")
     print(f"  sigmoid mean abs diff: {mean_diff:.6f}")
-    if max_diff <= float(args.verify_max_diff):
+    verification = {
+        "status": (
+            "passed" if max_diff <= float(args.verify_max_diff) else "failed"
+        ),
+        "metric": "sigmoid_absolute_difference",
+        "input_profile": "uniform_tanh_domain_-0.999_0.999",
+        "input_seed": verification_seed,
+        "max_abs_diff": max_diff,
+        "mean_abs_diff": mean_diff,
+        "max_allowed_diff": float(args.verify_max_diff),
+        "batch_size": batch,
+    }
+    if verification["status"] == "passed":
         print("  Verification PASSED")
-        return {
-            "status": "passed",
-            "metric": "sigmoid_absolute_difference",
-            "max_abs_diff": max_diff,
-            "mean_abs_diff": mean_diff,
-            "max_allowed_diff": float(args.verify_max_diff),
-            "batch_size": batch,
-        }
+        return verification
+    if bool(args.record_verification_failure):
+        print(
+            "  Verification FAILED and was recorded for explicit diagnostic use; "
+            "the engine is not a verified production artifact"
+        )
+        return verification
     raise RuntimeError(
         "TensorRT verification failed: "
         f"max sigmoid difference {max_diff:.6f} exceeds "
@@ -535,6 +558,15 @@ def parse_args(argv: list[str] | None = None):
         action=argparse.BooleanOptionalAction,
         default=CONFIG["skip_verify"],
     )
+    parser.add_argument(
+        "--record-verification-failure",
+        action=argparse.BooleanOptionalAction,
+        default=CONFIG["record_verification_failure"],
+        help=(
+            "Diagnostic only: write a sidecar with verification status=failed "
+            "instead of aborting when the measured tolerance is exceeded"
+        ),
+    )
     parser.add_argument("--verify-batch-size", type=int, default=CONFIG["verify_batch_size"])
     parser.add_argument("--verify-max-diff", type=float, default=CONFIG["verify_max_diff"])
     return parser.parse_args(argv)
@@ -549,9 +581,13 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Device: {device} ({torch.cuda.get_device_name(device)})")
 
     model, model_cfg, _ = load_checkpoint_model(args, device)
-    if args.skip_verify and model_cfg.get("artifact_role") == PAPER_ARTIFACT_ROLE:
-        raise RuntimeError("Paper TensorRT artifacts cannot be exported with --skip-verify")
-    if model_cfg.get("artifact_role") == PAPER_ARTIFACT_ROLE:
+    strict_paper_artifact = model_cfg.get("artifact_role") in STRICT_TENSORRT_ARTIFACT_ROLES
+    if args.skip_verify and strict_paper_artifact:
+        raise RuntimeError(
+            "Paper and historical-paper TensorRT artifacts cannot be exported "
+            "with --skip-verify"
+        )
+    if strict_paper_artifact:
         tolerance = float(args.verify_max_diff)
         if (
             not math.isfinite(tolerance)

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Run the paper PRESTO search chain on one or more cleaned filterbanks.
+"""Run the PRESTO search chain on one or more cleaned filterbanks.
 
-The default search protocol is ``prepsubband -> realfft -> rednoise ->
-accelsearch`` with ``zmax=200`` and ``numharm=8``. Real-GMRT searches should
-override those values as documented in ``docs/paper-specification.md``.
+The default chain is ``prepsubband -> realfft -> rednoise -> accelsearch`` with
+``zmax=200`` and ``numharm=8``. Choose observation-specific DM and acceleration
+settings explicitly for each target.
 """
 
 import argparse
@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 CONFIG = {
     # Set this to True to pass -zerodm to prepsubband by default.
@@ -31,7 +31,7 @@ CONFIG = {
     "numharm": 8,
     "nobary": True,
     "rednoise": True,
-    "cleanup_products": True,
+    "cleanup_products": False,
     # None means keep the accelsearch product matching zmax, e.g. ACCEL_4 for
     # -zmax 4. Set explicitly only when cleaning a non-standard product.
     "keep_accel_suffix": None,
@@ -129,7 +129,7 @@ def run_command(cmd, cwd, dry_run=False, log_path=None):
     print(f"$ {printable}")
 
     log = None
-    if log_path is not None:
+    if log_path is not None and not dry_run:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log = open(log_path, "w", buffering=1)
         log.write(f"$ {printable}\n\n")
@@ -209,6 +209,7 @@ def cleanup_presto_products(
     keep_suffix,
     dry_run=False,
     extra_paths=(),
+    eligible_paths=None,
 ):
     """
     Keep only the requested accelsearch product for one PRESTO run.
@@ -221,8 +222,11 @@ def cleanup_presto_products(
     kept = []
     removed = []
 
-    paths = list(sorted(out_dir.glob(pattern)))
-    paths.extend(Path(p) for p in extra_paths)
+    if eligible_paths is None:
+        paths = list(sorted(out_dir.glob(pattern)))
+        paths.extend(Path(p) for p in extra_paths)
+    else:
+        paths = sorted(Path(path) for path in eligible_paths)
 
     seen = set()
     for path in paths:
@@ -267,14 +271,12 @@ def run_one(args, fil_path):
     else:
         out_dir = _resolve(args.out_dir) if args.out_dir else fil_path.parent / "presto_accelsearch"
         out_prefix = out_dir / safe_presto_prefix_name(fil_path.stem, args.max_presto_prefix_name)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    if not args.dry_run:
+        out_dir.mkdir(parents=True, exist_ok=True)
 
     dm_label = presto_dm_label(args.dm)
     predicted_dat_path = select_dat_file(out_prefix, args.dm, dry_run=True)
-    existing_dat_path = (
-        select_dat_file(out_prefix, args.dm) if args.skip_existing else None
-    )
-    dat_path = existing_dat_path or predicted_dat_path
+    dat_path = predicted_dat_path
     prepsubband_log = out_dir / f"{out_prefix.name}.prepsubband.log"
     realfft_log = out_dir / f"{out_prefix.name}.realfft.log"
     rednoise_log = out_dir / f"{out_prefix.name}.rednoise.log"
@@ -307,19 +309,44 @@ def run_one(args, fil_path):
         result["status"] = "ok"
         return result
 
-    if existing_dat_path is not None and existing_dat_path.is_file():
-        print(f"Skipping prepsubband; existing dat found: {dat_path}")
-        prepsubband_rc = 0
-    else:
-        prepsubband_cmd = build_exec_command(
-            args, build_prepsubband_command(args, fil_path, out_prefix)
+    product_pattern = f"{out_prefix.name}_DM{dm_label}*"
+    product_candidates = list(out_dir.glob(product_pattern))
+    if args.write_logs:
+        product_candidates.extend(
+            (prepsubband_log, realfft_log, rednoise_log, accelsearch_log)
         )
-        prepsubband_rc = run_command(
-            prepsubband_cmd,
-            out_dir,
-            dry_run=args.dry_run,
-            log_path=prepsubband_log if args.write_logs else None,
+    symlinks = sorted(
+        str(path) for path in set(product_candidates) if path.is_symlink()
+    )
+    if symlinks:
+        raise RuntimeError(
+            "Refusing to run PRESTO with symbolic-link products: "
+            + ", ".join(symlinks)
         )
+    products_before = {
+        path for path in product_candidates if path.is_file()
+    }
+    result["preexisting_products"] = [str(path) for path in sorted(products_before)]
+    if products_before and args.skip_existing:
+        print(f"Skipping PRESTO; existing products found for {out_prefix.name}")
+        result["status"] = "skipped_existing"
+        return result
+    if products_before and not args.overwrite and not args.dry_run:
+        raise FileExistsError(
+            "Refusing to overwrite existing PRESTO products; use --skip-existing "
+            "or explicitly pass --overwrite: "
+            + ", ".join(str(path) for path in sorted(products_before))
+        )
+
+    prepsubband_cmd = build_exec_command(
+        args, build_prepsubband_command(args, fil_path, out_prefix)
+    )
+    prepsubband_rc = run_command(
+        prepsubband_cmd,
+        out_dir,
+        dry_run=args.dry_run,
+        log_path=prepsubband_log if args.write_logs else None,
+    )
     result["prepsubband_returncode"] = prepsubband_rc
     if prepsubband_rc != 0:
         result["status"] = "prepsubband_failed"
@@ -379,6 +406,21 @@ def run_one(args, fil_path):
     result["status"] = "ok" if accel_rc == 0 else "accelsearch_failed"
 
     if args.cleanup_products and (args.dry_run or accel_rc == 0):
+        products_after = {
+            path
+            for path in (
+                *out_dir.glob(product_pattern),
+                prepsubband_log,
+                realfft_log,
+                rednoise_log,
+                accelsearch_log,
+            )
+            if path.is_file()
+        }
+        created_products = products_after - products_before
+        result["created_products"] = [
+            str(path) for path in sorted(created_products)
+        ]
         keep_suffix = resolve_keep_accel_suffix(args)
         kept, removed = cleanup_presto_products(
             out_dir=out_dir,
@@ -387,6 +429,7 @@ def run_one(args, fil_path):
             keep_suffix=keep_suffix,
             dry_run=args.dry_run,
             extra_paths=(prepsubband_log, realfft_log, rednoise_log, accelsearch_log),
+            eligible_paths=created_products,
         )
         result["keep_accel_suffix"] = keep_suffix
         result["kept_products"] = kept
@@ -456,6 +499,11 @@ def parse_args(argv=None):
     )
     ap.add_argument("--skip-missing", action="store_true")
     ap.add_argument("--skip-existing", action="store_true")
+    ap.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Explicitly allow PRESTO commands to replace existing products.",
+    )
     ap.add_argument("--keep-going", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument(
@@ -467,7 +515,10 @@ def parse_args(argv=None):
         "--cleanup-products",
         action=argparse.BooleanOptionalAction,
         default=CONFIG["cleanup_products"],
-        help="After accelsearch, remove PRESTO products except files ending with --keep-accel-suffix.",
+        help=(
+            "After accelsearch, remove only products created by this invocation, "
+            "except files ending with --keep-accel-suffix. Disabled by default."
+        ),
     )
     ap.add_argument(
         "--cleanup-only",
@@ -503,6 +554,8 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
+    if args.skip_existing and args.overwrite:
+        raise ValueError("Use only one of --skip-existing or --overwrite")
 
     results = []
     for fil in args.fil:
@@ -523,17 +576,25 @@ def main(argv=None):
     summary_path = _resolve(args.summary) if args.summary else default_out_dir / "presto_accelsearch_summary.json"
 
     if args.summary or args.write_summary:
+        if summary_path.is_symlink():
+            raise RuntimeError(f"Refusing to write summary through symlink: {summary_path}")
+        if summary_path.exists() and not args.overwrite:
+            raise FileExistsError(
+                f"Refusing to overwrite PRESTO summary: {summary_path}; "
+                "pass --overwrite explicitly"
+            )
         summary_path.parent.mkdir(parents=True, exist_ok=True)
         with open(summary_path, "w") as f:
             json.dump(results, f, indent=2)
         print(f"Summary written to {summary_path}")
     elif summary_path.is_file():
-        if args.dry_run:
-            print(f"[dry-run] Would remove {summary_path}")
-        else:
-            summary_path.unlink()
+        print(f"Leaving existing summary unchanged: {summary_path}")
 
-    failed = [r for r in results if r.get("status") not in ("ok", "missing")]
+    failed = [
+        r
+        for r in results
+        if r.get("status") not in ("ok", "missing", "skipped_existing")
+    ]
     return 1 if failed else 0
 
 

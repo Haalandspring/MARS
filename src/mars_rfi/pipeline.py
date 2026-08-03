@@ -28,6 +28,7 @@ Memory: the current implementation reads the full observation and keeps its
         is not yet out-of-core streaming. See docs/limitations.md.
 """
 
+import contextlib
 import math
 import os
 import tempfile
@@ -57,6 +58,29 @@ from .provenance import (
 # =============================================================================
 # CONFIG
 # =============================================================================
+
+MINIMUM_SUPPORTED_CHANNELS = 512
+DETERMINISTIC_MEDIAN_SORT_MAX_ELEMENTS = 8 * 1024 * 1024
+
+
+def validate_supported_channel_count(nchans: int, cfg: dict) -> int:
+    """Enforce the curated C>=512 scope at every public filterbank entry point."""
+
+    minimum_channels = int(
+        cfg.get("minimum_supported_channels", MINIMUM_SUPPORTED_CHANNELS)
+    )
+    if minimum_channels < MINIMUM_SUPPORTED_CHANNELS:
+        raise ValueError(
+            "minimum_supported_channels cannot be lowered below the curated "
+            f"runtime boundary C={MINIMUM_SUPPORTED_CHANNELS}"
+        )
+    if int(nchans) < minimum_channels:
+        raise NotImplementedError(
+            f"This MARS runtime profile supports C >= {minimum_channels} channels; "
+            f"the input contains C={int(nchans)}. The C<512 paper branch is "
+            "intentionally outside the curated implementation scope."
+        )
+    return minimum_channels
 
 CONFIG = {
     # Artifact identity: prevents a topology-identical loss ablation from being
@@ -138,6 +162,11 @@ CONFIG = {
     "batch_size":    32,
     "use_amp":       True,
     "threshold":     0.5,
+    # Keep the library default on the historical throughput-oriented path.
+    # Reproducibility profiles opt into strict, cross-process deterministic
+    # PyTorch inference explicitly; the article timing profile opts out.
+    "deterministic_inference": False,
+    "inference_seed": 1234,
 
     # Optional hysteresis post-processing for the NN mask. Seed from confident
     # pixels, then grow through connected lower-probability support. This helps
@@ -167,6 +196,9 @@ CONFIG = {
     # --- Normalisation ---
     "target_segment_seconds": 2.0,
     "patch_size":       512,
+    # C<512 is intentionally outside the supported scope of this curated
+    # runtime. Helper-level packing code is retained for development only.
+    "minimum_supported_channels": MINIMUM_SUPPORTED_CHANNELS,
     "sat_sigma":        6.0,
     "sat_ratio_segment": 0.5,
     "mad_const":        1.4826,
@@ -272,6 +304,129 @@ def _empty_cuda_cache(cfg=None):
         torch.cuda.empty_cache()
 
 
+def _deterministic_median_values(values, *, dim, keepdim=False):
+    """Compute lower medians with bounded-memory stable value sorting."""
+
+    normalised_dim = int(dim) % values.ndim
+    width = int(values.shape[normalised_dim])
+    if width < 1:
+        raise IndexError("median cannot be computed over an empty dimension")
+    midpoint = (width - 1) // 2
+    moved = values.movedim(normalised_dim, -1)
+    rows = moved.reshape(-1, width)
+    result_flat = torch.empty(
+        rows.shape[0], dtype=values.dtype, device=values.device
+    )
+    rows_per_chunk = max(
+        1, DETERMINISTIC_MEDIAN_SORT_MAX_ELEMENTS // width
+    )
+    for start in range(0, rows.shape[0], rows_per_chunk):
+        stop = min(start + rows_per_chunk, rows.shape[0])
+        sorted_chunk = rows[start:stop].sort(dim=1, stable=True)
+        result_flat[start:stop] = sorted_chunk.values[:, midpoint]
+        del sorted_chunk
+    result = result_flat.reshape(moved.shape[:-1])
+    return result.unsqueeze(normalised_dim) if keepdim else result
+
+
+def _median_values(values, *, dim=None, keepdim=False):
+    """Return median values without CUDA's nondeterministic index output."""
+
+    if dim is None:
+        return values.median()
+    if values.is_cuda and torch.are_deterministic_algorithms_enabled():
+        return _deterministic_median_values(values, dim=dim, keepdim=keepdim)
+    return values.median(dim=dim, keepdim=keepdim).values
+
+
+def resolve_inference_runtime_settings(cfg):
+    """Return the explicit backend settings selected for one pipeline run."""
+
+    deterministic = bool(cfg.get("deterministic_inference", False))
+    seed = int(cfg.get("inference_seed", 1234))
+    if not 0 <= seed < 2**63:
+        raise ValueError("inference_seed must be in the range [0, 2**63)")
+    tensorrt = bool(cfg.get("tensorrt_path"))
+    return {
+        "deterministic_inference": deterministic,
+        "inference_seed": seed,
+        "cudnn_benchmark": not deterministic,
+        "cudnn_deterministic": deterministic,
+        "deterministic_algorithms": deterministic,
+        "cublas_workspace_config": os.environ.get("CUBLAS_WORKSPACE_CONFIG"),
+        "use_amp": bool(cfg.get("use_amp", True)),
+        "cudnn_allow_tf32": bool(torch.backends.cudnn.allow_tf32),
+        "matmul_allow_tf32": bool(torch.backends.cuda.matmul.allow_tf32),
+        "backend": "tensorrt" if tensorrt else "pytorch",
+        "determinism_scope": (
+            "torch-pre-and-postprocessing-only"
+            if tensorrt
+            else "pytorch-end-to-end"
+        ),
+        "tensorrt_determinism_guaranteed": False if tensorrt else None,
+    }
+
+
+@contextlib.contextmanager
+def inference_runtime_settings(cfg):
+    """Apply per-run inference settings and restore process-global flags."""
+
+    settings = resolve_inference_runtime_settings(cfg)
+    previous_benchmark = torch.backends.cudnn.benchmark
+    previous_cudnn_deterministic = torch.backends.cudnn.deterministic
+    previous_algorithms = torch.are_deterministic_algorithms_enabled()
+    previous_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+    previous_cpu_rng = torch.random.get_rng_state()
+    previous_cuda_rng = (
+        torch.cuda.get_rng_state_all() if torch.cuda.is_initialized() else None
+    )
+    try:
+        torch.backends.cudnn.benchmark = settings["cudnn_benchmark"]
+        torch.backends.cudnn.deterministic = settings["cudnn_deterministic"]
+        torch.use_deterministic_algorithms(settings["deterministic_algorithms"])
+        torch.manual_seed(settings["inference_seed"])
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(settings["inference_seed"])
+        print(
+            "Inference runtime: "
+            f"backend={settings['backend']}, "
+            f"deterministic={settings['deterministic_inference']}, "
+            f"seed={settings['inference_seed']}, "
+            f"cudnn_benchmark={settings['cudnn_benchmark']}, "
+            f"cudnn_deterministic={settings['cudnn_deterministic']}, "
+            f"deterministic_algorithms={settings['deterministic_algorithms']}, "
+            f"amp={settings['use_amp']}, "
+            f"cudnn_allow_tf32={settings['cudnn_allow_tf32']}, "
+            f"matmul_allow_tf32={settings['matmul_allow_tf32']}, "
+            "cublas_workspace_config="
+            f"{settings['cublas_workspace_config'] or 'unset'}"
+        )
+        if (
+            settings["deterministic_inference"]
+            and settings["cublas_workspace_config"] is None
+        ):
+            print(
+                "  WARNING: set CUBLAS_WORKSPACE_CONFIG=:4096:8 before launching "
+                "Python if this configuration adds a cuBLAS-backed operation."
+            )
+        if settings["backend"] == "tensorrt" and settings["deterministic_inference"]:
+            print(
+                "  WARNING: deterministic_inference controls PyTorch pre/post-processing "
+                "but cannot guarantee determinism inside a TensorRT engine."
+            )
+        yield settings
+    finally:
+        torch.use_deterministic_algorithms(
+            previous_algorithms,
+            warn_only=previous_warn_only,
+        )
+        torch.backends.cudnn.deterministic = previous_cudnn_deterministic
+        torch.backends.cudnn.benchmark = previous_benchmark
+        torch.random.set_rng_state(previous_cpu_rng)
+        if previous_cuda_rng is not None:
+            torch.cuda.set_rng_state_all(previous_cuda_rng)
+
+
 # =============================================================================
 # GPU: raw-domain segment-level persistent RFI detector
 # =============================================================================
@@ -281,9 +436,9 @@ def _positive_robust_score_by_segment(values, cfg):
     Positive robust z-score over channels independently for each segment.
     values: (nchans, nsegments)
     """
-    center = values.median(dim=0).values
+    center = _median_values(values, dim=0)
     residual = values - center.unsqueeze(0)
-    scale = residual.abs().median(dim=0).values * cfg["mad_const"]
+    scale = _median_values(residual.abs(), dim=0) * cfg["mad_const"]
     score = residual / torch.clamp(scale.unsqueeze(0), min=1e-6)
     return torch.clamp(score, min=0.0)
 
@@ -851,7 +1006,7 @@ def running_median_1d_gpu(x, window):
     pad = window // 2
     y = F.pad(x.view(1, 1, -1), (pad, pad), mode="reflect")
     windows = y.unfold(2, window, 1)
-    return windows.median(dim=-1).values.view(-1)
+    return _median_values(windows, dim=-1).view(-1)
 
 
 def remove_baseline_gpu(z_data, live_mask, fully_flagged, cfg, verbose=True):
@@ -933,8 +1088,8 @@ def rescale_to_uint8_gpu(z_data, fully_flagged, cfg):
     for c0 in range(0, nchans, channel_chunk):
         c1 = min(c0 + channel_chunk, nchans)
         chunk = z_data[c0:c1]
-        med = chunk.median(dim=1).values.unsqueeze(1)
-        mad = (chunk - med).abs().median(dim=1).values.unsqueeze(1) * cfg["mad_const"]
+        med = _median_values(chunk, dim=1).unsqueeze(1)
+        mad = _median_values((chunk - med).abs(), dim=1).unsqueeze(1) * cfg["mad_const"]
 
         valid = (mad.squeeze(1) > 1e-6) & ~fully_flagged[c0:c1]
         safe_mad = torch.where(mad > 1e-6, mad, torch.ones_like(mad))
@@ -1019,8 +1174,8 @@ def write_z_filterbank_gpu(path, z_data, fully_flagged, cfg, header_bytes, label
     for c0 in range(0, nchans, channel_chunk):
         c1 = min(c0 + channel_chunk, nchans)
         chunk = z_data[c0:c1]
-        med = chunk.median(dim=1).values.unsqueeze(1)
-        mad = (chunk - med).abs().median(dim=1).values.unsqueeze(1) * cfg["mad_const"]
+        med = _median_values(chunk, dim=1).unsqueeze(1)
+        mad = _median_values((chunk - med).abs(), dim=1).unsqueeze(1) * cfg["mad_const"]
         ch_medians[c0:c1] = med
         ch_mads[c0:c1] = mad
         del chunk, med, mad
@@ -1489,7 +1644,7 @@ def infer_patches(model, patches, cfg, device):
 # =============================================================================
 
 @torch.inference_mode()
-def run_pipeline(cfg):
+def _run_pipeline_impl(cfg):
     for required_key in ("input_fil", "output_fil"):
         if not cfg.get(required_key):
             raise ValueError(f"{required_key} must be provided")
@@ -1498,7 +1653,6 @@ def run_pipeline(cfg):
     if device.type == "cuda":
         print(f"GPU: {torch.cuda.get_device_name(0)}")
         print(f"GPU memory total: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
-        torch.backends.cudnn.benchmark = True
 
     if os.path.abspath(cfg["input_fil"]) == os.path.abspath(cfg["output_fil"]):
         raise ValueError("input_fil and output_fil must be different files")
@@ -1515,10 +1669,11 @@ def run_pipeline(cfg):
     t_step = time.perf_counter()
 
     fil = FilReader(cfg["input_fil"])
-    block = fil.read_block(0, fil.header.nsamples)
     nchans = fil.header.nchans
     ntime = fil.header.nsamples
     tsamp = fil.header.tsamp
+    validate_supported_channel_count(nchans, cfg)
+    block = fil.read_block(0, ntime)
     input_nbits = int(getattr(fil.header, "nbits", 8))
     if input_nbits != 8:
         raise ValueError(
@@ -1602,8 +1757,11 @@ def run_pipeline(cfg):
 
     if diag_prefix and cfg.get("diagnostic_global_normalisation", False):
         print("  Building diagnostic global channel normalisation...")
-        global_med = raw.median(dim=1, keepdim=True).values
-        global_mad = (raw - global_med).abs().median(dim=1, keepdim=True).values * cfg["mad_const"]
+        global_med = _median_values(raw, dim=1, keepdim=True)
+        global_mad = (
+            _median_values((raw - global_med).abs(), dim=1, keepdim=True)
+            * cfg["mad_const"]
+        )
         global_std = raw.std(dim=1, keepdim=True)
         global_scale = torch.where(global_mad < cfg["mad_min_valid"], global_std, global_mad)
         global_safe_scale = torch.where(
@@ -1678,8 +1836,11 @@ def run_pipeline(cfg):
         raw_segs = raw_segs.to(raw_compute_dtype)
 
     MAD_CONST = 1.4826
-    seg_medians = raw_segs.median(dim=2, keepdim=True).values
-    seg_mads = (raw_segs - seg_medians).abs().median(dim=2, keepdim=True).values * MAD_CONST
+    seg_medians = _median_values(raw_segs, dim=2, keepdim=True)
+    seg_mads = (
+        _median_values((raw_segs - seg_medians).abs(), dim=2, keepdim=True)
+        * MAD_CONST
+    )
     science_vars, science_means = torch.var_mean(
         raw_segs,
         dim=2,
@@ -1690,8 +1851,11 @@ def run_pipeline(cfg):
     seg_dead = seg_stds.squeeze(2) < 1e-6
 
     seg_ch_medians = seg_medians.squeeze(2)
-    seg_global_median = seg_ch_medians.median(dim=0).values
-    seg_global_mad = (seg_ch_medians - seg_global_median).abs().median(dim=0).values * MAD_CONST
+    seg_global_median = _median_values(seg_ch_medians, dim=0)
+    seg_global_mad = (
+        _median_values((seg_ch_medians - seg_global_median).abs(), dim=0)
+        * MAD_CONST
+    )
     seg_sat_thresh = seg_global_median + cfg["sat_sigma"] * seg_global_mad
     seg_sat_fraction = (raw_segs > seg_sat_thresh.unsqueeze(0).unsqueeze(2)).float().mean(dim=2)
     seg_sat_unusable = seg_sat_fraction > cfg["sat_ratio_segment"]
@@ -1820,8 +1984,11 @@ def run_pipeline(cfg):
         tail_seg = raw[:, tail_start:ntime]
         if tail_seg.dtype != raw_compute_dtype:
             tail_seg = tail_seg.to(raw_compute_dtype)
-        tail_median = tail_seg.median(dim=1, keepdim=True).values
-        tail_mad = (tail_seg - tail_median).abs().median(dim=1, keepdim=True).values * MAD_CONST
+        tail_median = _median_values(tail_seg, dim=1, keepdim=True)
+        tail_mad = (
+            _median_values((tail_seg - tail_median).abs(), dim=1, keepdim=True)
+            * MAD_CONST
+        )
         tail_std = tail_seg.std(dim=1, keepdim=True)
         tail_dead = tail_std.squeeze(1) < 1e-6
         tail_use_std = tail_mad < cfg["mad_min_valid"]
@@ -2510,6 +2677,13 @@ def run_pipeline(cfg):
         print(f"Size difference: {output_size - input_size} bytes")
 
     return timings
+
+
+def run_pipeline(cfg):
+    """Run mitigation with explicit, non-leaking inference backend settings."""
+
+    with inference_runtime_settings(cfg):
+        return _run_pipeline_impl(cfg)
 
 
 if __name__ == "__main__":

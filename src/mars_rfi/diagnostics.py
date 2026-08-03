@@ -34,6 +34,11 @@ from sigpyproc.readers import FilReader
 
 from .config import CONFIG as TRAIN_CONFIG
 from .model import build_model, count_parameters
+from .provenance import (
+    ARTIFACT_IDENTITY_KEYS,
+    model_config_mismatches,
+    validate_training_identity,
+)
 from .preprocess import (
     replace_negative_blocks_2d,
     replace_negative_blocks_2d_per_segment,
@@ -45,10 +50,12 @@ from .preprocess import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 from .pipeline import (  # noqa: E402
     CONFIG as V6_CONFIG,
+    MINIMUM_SUPPORTED_CHANNELS,
     _apply_raw_detector_mode,
     apply_nn_input_blank_mode,
     detect_raw_segment_persistent_rfi_gpu,
     split_segment_to_patches,
+    validate_supported_channel_count,
 )
 
 
@@ -112,6 +119,7 @@ CONFIG = {
     # Paper-aligned preprocessing controls.
     "target_segment_seconds": 2.0,
     "patch_size": 512,
+    "minimum_supported_channels": MINIMUM_SUPPORTED_CHANNELS,
     "sat_sigma": 6.0,
     "sat_ratio_segment": 0.5,
     "mad_const": 1.4826,
@@ -304,6 +312,7 @@ def _dtype_from_name(name, *, kind: str):
 
 def _load_filterbank_to_gpu(cfg: dict, device: torch.device):
     fil = FilReader(cfg["input_fil"])
+    validate_supported_channel_count(fil.header.nchans, cfg)
     block = fil.read_block(0, fil.header.nsamples)
     raw_dtype, raw_dtype_name = _dtype_from_name(cfg["raw_gpu_dtype"], kind="raw")
     raw = torch.from_numpy(block.data).to(device=device, dtype=raw_dtype)
@@ -604,6 +613,16 @@ def load_mars_model(cfg: dict, device: torch.device) -> torch.nn.Module:
 
     ckpt = torch.load(ckpt_path, map_location=device)
     ckpt_config = ckpt.get("config", {}) if isinstance(ckpt, dict) else {}
+    validate_training_identity(ckpt_config, source=f"checkpoint {ckpt_path}")
+    requested_model_cfg = {
+        key: value for key, value in cfg.items() if key not in ARTIFACT_IDENTITY_KEYS
+    }
+    mismatches = model_config_mismatches(requested_model_cfg, ckpt_config)
+    if mismatches:
+        raise RuntimeError(
+            "Checkpoint model config does not match diagnostics: "
+            + "; ".join(mismatches)
+        )
     model_cfg = dict(cfg)
     model_cfg.update(ckpt_config)
     model = build_model(model_cfg).to(device)
@@ -615,11 +634,18 @@ def load_mars_model(cfg: dict, device: torch.device) -> torch.nn.Module:
             "Checkpoint does not match mars_rfi.model. "
             f"missing={missing}, unexpected={unexpected}"
         )
+    parameter_count = count_parameters(model)
+    expected_parameters = model_cfg.get("expected_parameters")
+    if expected_parameters is not None and parameter_count != int(expected_parameters):
+        raise RuntimeError(
+            f"Checkpoint model has {parameter_count:,} trainable parameters; "
+            f"expected {int(expected_parameters):,}"
+        )
     model.eval()
     epoch = ckpt.get("epoch", "?") if isinstance(ckpt, dict) else "?"
     print(
         f"  {model_cfg.get('model', 'trt_shape_unet')} loaded: {ckpt_path} "
-        f"(epoch {epoch}, params {count_parameters(model):,})"
+        f"(epoch {epoch}, params {parameter_count:,})"
     )
     return model
 
@@ -1140,7 +1166,7 @@ def run(cfg: dict) -> None:
     print("\n[3/4] Loading MARS and running inference...")
     model = load_mars_model(cfg, device)
     prob = infer_patch_prob(model, patches, cfg, device)
-    pure_binary = prob > float(cfg["threshold"])
+    pure_binary = prob >= float(cfg["threshold"])
     if cfg.get("hys_enabled", False):
         binary = apply_hysteresis_mask(prob, cfg)
     else:

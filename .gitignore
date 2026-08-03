@@ -23,17 +23,53 @@ dist/
 *.npz
 *.pt
 *.pth
+*.safetensors
 *.onnx
 *.engine
+*.plan
 *.jsonl
+*.h5
+*.hdf5
+*.fits
+*.parquet
+*.zarr/
+*.dat
+*.fft
+*.inf
+*.cand
+*.txtcand
+*_ACCEL_*
 results/
 outputs/
+search_outputs/
 
 # Preserve documentation inside otherwise generated directories
 artifacts/*
 !artifacts/README.md
 data/*
 !data/README.md
+
+# Private research-validation workspace
+#
+# These files are kept locally for auditing the article, but they are not part
+# of the public mitigation package or the normal test suite.
+/paper_validation/
+/src/mars_rfi/paper_validation/
+/tests/paper_validation/
+/src/mars_rfi/migration/
+/tests/migration/
+/reproduction/
+/configs/benchmarks/
+/configs/pipeline/paper.json
+/configs/train/paper.json
+/configs/train/no_astro.json
+/configs/train/no_decoder_refinement.json
+/configs/train/no_horizontal_refinement.json
+/configs/train/no_vertical_refinement.json
+/docs/paper-code-differences.md
+/docs/paper-specification.md
+/docs/reproducibility.md
+/environments/requirements-paper.txt
 
 # Logs and scheduler output
 *.log

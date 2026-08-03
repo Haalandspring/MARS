@@ -1,20 +1,35 @@
-# Limitations
+# Runtime limitations
 
-- **No final model artifact:** source code cannot validate the paper's reported
-  metrics without the selected checkpoint and data.
-- **GPU-resident, not out-of-core:** the pipeline tiles inference by segment but
-  currently reads the complete filterbank and keeps full-size working arrays in
-  memory. Long observations may exceed GPU memory.
-- **8-bit input only:** output is uint8 and the input SIGPROC header is retained.
-  The code rejects other input bit depths to avoid a corrupt header/data pair.
-- **Whole-channel external preflags only:** `preflag_channels` supports upstream
-  channel flags; an arbitrary channel-time preflag mask is not yet an input.
-- **TensorRT portability:** engines are tied to TensorRT/CUDA/GPU details. Build
-  locally and retain the generated, numerically verified metadata sidecar; the
-  paper profile rejects missing or unverified sidecars.
-- **Optional `zdot` ambiguity:** the paper does not unambiguously identify which
-  reported full-filterbank results enabled it. Runs must state the switch.
-- **No uncertainty calibration:** the paper reports deterministic fixed-seed
-  aggregates rather than confidence intervals or run-to-run variance.
-- **External tools:** PRESTO, SIGPROC, PulsarX/Filtool, SPECTRALib, and RFDL have
-  their own installation, version, and licensing requirements.
+This page describes limitations of the reusable public mitigation system.
+Datasets, model binaries, and benchmark outputs are distributed separately from
+the source repository.
+
+- **At least 512 channels:** the runtime intentionally rejects filterbanks with
+  `C < 512`. The minimum cannot be lowered through configuration.
+- **8-bit filterbanks only:** MARS writes uint8 samples while preserving the
+  validated SIGPROC header. Other input bit depths fail explicitly rather than
+  producing a header/data mismatch.
+- **GPU-resident processing:** inference is tiled into segments and patches,
+  but the current pipeline reads the complete observation and keeps full-size
+  working arrays on the GPU. Long observations can exceed device memory.
+- **No in-place cleaning:** input and output paths must be different. The
+  source observation is never overwritten by `mars-mitigate`.
+- **Whole-channel external preflags:** `preflag_channels` accepts upstream
+  channel flags; an arbitrary channel-time external mask is not yet supported.
+- **Optional processing changes science data:** hysteresis and `zdot` are
+  disabled in the main mitigation profile. Runs that enable them must preserve
+  the resolved configuration with the output.
+- **Stack-local PyTorch determinism:** deterministic science profiles disable
+  cuDNN autotuning and require deterministic algorithms, but byte identity is
+  promised only for the same input, checkpoint, configuration, GPU, and
+  PyTorch/CUDA/cuDNN stack.
+- **TensorRT portability:** engines depend on TensorRT, CUDA, GPU architecture,
+  precision, and build configuration. Build on the deployment machine and keep
+  the verified metadata sidecar. PyTorch deterministic flags do not govern
+  kernels inside the TensorRT engine.
+- **No uncertainty estimate in a single mask:** the runtime produces a
+  thresholded segmentation mask, not calibrated per-pixel uncertainty or an
+  ensemble confidence interval.
+
+The package fails explicitly at these boundaries instead of silently changing
+the input contract or falling back to a different model/backend.
