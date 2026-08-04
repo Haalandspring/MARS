@@ -71,7 +71,7 @@
   <text x="475" y="182" class="node-title">SIGPROC filterbank</text>
   <text x="475" y="209" class="node-copy">uint8 · channels × time</text>
   <text x="890" y="182" class="node-title">Check &amp; preserve header</text>
-  <text x="890" y="209" class="node-copy">8-bit input · C ≥ 512</text>
+  <text x="890" y="209" class="node-copy">8-bit input · C ≥ 1</text>
   <text x="1305" y="182" class="node-title">Load to GPU</text>
   <text x="1305" y="209" class="node-copy">create two working branches</text>
   <path d="M615 190 H725" class="arrow"/>
@@ -90,9 +90,9 @@
     <rect x="1270" y="325" width="230" height="105" rx="17" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
     <rect x="1535" y="325" width="190" height="105" rx="17" fill="#f5f3ff" stroke="#7c3aed" stroke-width="3"/>
   </g>
-  <text x="405" y="359" class="node-title-small">Segment + robust norm.</text>
-  <text x="405" y="389" class="node-copy">per-channel median/MAD</text>
-  <text x="405" y="412" class="node-copy">model-input branch</text>
+  <text x="405" y="359" class="node-title-small">Normalize + small-C stack</text>
+  <text x="405" y="389" class="node-copy">median/MAD · C&lt;512</text>
+  <text x="405" y="412" class="node-copy">time slabs → virtual rows</text>
 
   <text x="650" y="359" class="node-title-small">Input cleanup + tanh</text>
   <text x="650" y="389" class="node-copy">blank / negative handling</text>

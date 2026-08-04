@@ -69,6 +69,7 @@ Edit `config.json` before running. Important options include:
 | `tensorrt_path` | Verified TensorRT engine; set to `null` for PyTorch. |
 | `batch_size` | Patch inference batch size. |
 | `threshold` | Binary RFI-mask threshold. |
+| `small_channel_packing_enabled` | Stack time slabs along frequency when `C < 512`. |
 | `raw_compute_dtype` | Pre/post-processing precision; default `float16`. |
 | `hys_enabled` | Enable or disable mask hysteresis. |
 | `science_zdot` | Enable the zero-DM projection. |
@@ -144,9 +145,16 @@ connections, and decoder morphology refinement explicit.
 ## Supported inputs
 
 - 8-bit SIGPROC filterbanks;
-- at least 512 frequency channels (`C < 512` is intentionally unsupported);
+- one or more frequency channels;
 - input and output must be different files; and
 - the observation must fit the current GPU-resident working set.
+
+For `C < 512`, MARS keeps the science data in its original coordinates and
+rearranges only the model-input branch. It splits the time axis into
+`ceil(512 / C)` contiguous slabs, stacks them along frequency, pads the final
+network patch when necessary, and reverses the same mapping on the predicted
+mask before replacement. For example, `[128, 4000]` becomes `[512, 1000]` for
+mask generation and is restored to `[128, 4000]` before the mask is applied.
 
 The current implementation loads the complete observation into the
 GPU-resident working set; it is not an out-of-core streaming implementation.

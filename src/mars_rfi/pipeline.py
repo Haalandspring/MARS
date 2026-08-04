@@ -59,12 +59,12 @@ from .provenance import (
 # CONFIG
 # =============================================================================
 
-MINIMUM_SUPPORTED_CHANNELS = 512
+MINIMUM_SUPPORTED_CHANNELS = 1
 DETERMINISTIC_MEDIAN_SORT_MAX_ELEMENTS = 8 * 1024 * 1024
 
 
 def validate_supported_channel_count(nchans: int, cfg: dict) -> int:
-    """Enforce the curated C>=512 scope at every public filterbank entry point."""
+    """Validate the physical channel count and the optional small-C path."""
 
     minimum_channels = int(
         cfg.get("minimum_supported_channels", MINIMUM_SUPPORTED_CHANNELS)
@@ -77,8 +77,15 @@ def validate_supported_channel_count(nchans: int, cfg: dict) -> int:
     if int(nchans) < minimum_channels:
         raise NotImplementedError(
             f"This MARS runtime profile supports C >= {minimum_channels} channels; "
-            f"the input contains C={int(nchans)}. The C<512 paper branch is "
-            "intentionally outside the curated implementation scope."
+            f"the input contains C={int(nchans)}."
+        )
+    patch_size = int(cfg.get("patch_size", 512))
+    if int(nchans) < patch_size and not cfg.get(
+        "small_channel_packing_enabled", True
+    ):
+        raise NotImplementedError(
+            f"The input contains C={int(nchans)} < {patch_size}, but "
+            "small_channel_packing_enabled is false."
         )
     return minimum_channels
 
@@ -196,9 +203,11 @@ CONFIG = {
     # --- Normalisation ---
     "target_segment_seconds": 2.0,
     "patch_size":       512,
-    # C<512 is intentionally outside the supported scope of this curated
-    # runtime. Helper-level packing code is retained for development only.
+    # For C<512, split time into enough contiguous slabs to reach at least 512
+    # virtual rows, stack those slabs along frequency, infer 512x512 patches,
+    # and restore the mask to the original [frequency, time] coordinates.
     "minimum_supported_channels": MINIMUM_SUPPORTED_CHANNELS,
+    "small_channel_packing_enabled": True,
     "sat_sigma":        6.0,
     "sat_ratio_segment": 0.5,
     "mad_const":        1.4826,
@@ -672,58 +681,117 @@ def apply_nn_input_blank_mode(z_segs, degenerate, cfg):
 
 
 # =============================================================================
-# GPU: split segment into 512x512 patches
+# GPU: reversible C<512 stacking and 512x512 patch splitting
 # =============================================================================
+
+def stack_small_channel_segment(seg, patch_size=512):
+    """Stack contiguous time slabs along frequency for a C<patch_size segment.
+
+    For example, a ``[128, 4000]`` segment is split into four contiguous
+    ``[128, 1000]`` time slabs and stacked into ``[512, 1000]``.  When the
+    dimensions are not exactly divisible, only the end of the original time
+    axis is padded; the metadata makes the operation exactly reversible.
+    """
+    if seg.ndim != 2:
+        raise ValueError(f"Expected a [frequency, time] tensor, got {tuple(seg.shape)}")
+    nchans, seg_time = (int(size) for size in seg.shape)
+    if not 0 < nchans < int(patch_size):
+        raise ValueError(
+            f"Small-channel stacking requires 0 < C < {int(patch_size)}, got C={nchans}"
+        )
+    if seg_time <= 0:
+        raise ValueError("A segment must contain at least one time sample")
+
+    stack_factor = math.ceil(int(patch_size) / nchans)
+    packed_time = math.ceil(seg_time / stack_factor)
+    padded_original_time = stack_factor * packed_time
+    if padded_original_time != seg_time:
+        seg = F.pad(seg, (0, padded_original_time - seg_time))
+
+    packed = (
+        seg.reshape(nchans, stack_factor, packed_time)
+        .permute(1, 0, 2)
+        .reshape(stack_factor * nchans, packed_time)
+    )
+    metadata = {
+        "original_nchans": nchans,
+        "original_time": seg_time,
+        "stack_factor": stack_factor,
+        "packed_nchans": int(packed.shape[0]),
+        "packed_time": packed_time,
+        "padded_original_time": padded_original_time,
+    }
+    return packed, metadata
+
+
+def restore_small_channel_segment(packed, metadata):
+    """Restore a tensor stacked by :func:`stack_small_channel_segment`."""
+    nchans = int(metadata["original_nchans"])
+    original_time = int(metadata["original_time"])
+    stack_factor = int(metadata["stack_factor"])
+    packed_nchans = int(metadata["packed_nchans"])
+    packed_time = int(metadata["packed_time"])
+    if packed.ndim != 2:
+        raise ValueError(f"Expected a [stacked-frequency, time] tensor, got {tuple(packed.shape)}")
+    if int(packed.shape[0]) < packed_nchans or int(packed.shape[1]) < packed_time:
+        raise ValueError(
+            "Packed tensor is smaller than its recorded shape: "
+            f"got {tuple(packed.shape)}, need {(packed_nchans, packed_time)}"
+        )
+
+    packed = packed[:packed_nchans, :packed_time]
+    restored = (
+        packed.reshape(stack_factor, nchans, packed_time)
+        .permute(1, 0, 2)
+        .reshape(nchans, stack_factor * packed_time)
+    )
+    return restored[:, :original_time]
+
 
 def split_segment_to_patches(seg, patch_size=512):
     """
     Split (nchans, seg_len) into (N, 1, 512, 512) patches for NN.
-    Handles non-512-divisible nchans via overlap.
+    Handles non-512-divisible nchans via overlap. For C<512, it first
+    performs reversible time-to-frequency stacking and pads only the final
+    packed-time patch sent to the network.
     Returns: patches (N, 1, 512, 512), metadata for reconstruction
     """
     nchans, seg_len = seg.shape
     if nchans <= 0:
         raise ValueError("A segment must contain at least one frequency channel")
+    if seg_len <= 0:
+        raise ValueError("A segment must contain at least one time sample")
+
+    if nchans < patch_size:
+        packed, packing_meta = stack_small_channel_segment(seg, patch_size)
+        packed_time = int(packing_meta["packed_time"])
+        network_time = math.ceil(packed_time / patch_size) * patch_size
+        if network_time != packed_time:
+            packed = F.pad(packed, (0, network_time - packed_time))
+
+        patches, inner_meta = split_segment_to_patches(packed, patch_size)
+        meta = {
+            "nchans": nchans,
+            "original_time": seg_len,
+            "n_time_patches": inner_meta["n_time_patches"],
+            "full_chan_blocks": inner_meta["full_chan_blocks"],
+            "has_overlap": inner_meta["has_overlap"],
+            "overlap_chans": inner_meta["overlap_chans"],
+            "small_channel_packing": True,
+            "stack_factor": packing_meta["stack_factor"],
+            "packed_nchans": packing_meta["packed_nchans"],
+            "packed_time": packed_time,
+            "network_time": network_time,
+            "packing_meta": packing_meta,
+            "inner_meta": inner_meta,
+            "patch_count": int(patches.shape[0]),
+        }
+        return patches, meta
+
     n_time_patches = seg_len // patch_size
     full_chan_blocks = nchans // patch_size
     has_overlap = nchans % patch_size != 0
     overlap_chans = nchans - full_chan_blocks * patch_size
-
-    # For C < patch_size, pack consecutive time blocks along the frequency
-    # dimension and pad only unused rows. This is reversible and implements the
-    # small-C path described in the paper.
-    if nchans < patch_size:
-        time_blocks_per_patch = max(1, patch_size // nchans)
-        patch_count = (
-            n_time_patches + time_blocks_per_patch - 1
-        ) // time_blocks_per_patch
-        packed = torch.zeros(
-            patch_count,
-            patch_size,
-            patch_size,
-            dtype=seg.dtype,
-            device=seg.device,
-        )
-        for time_idx in range(n_time_patches):
-            patch_idx, slot = divmod(time_idx, time_blocks_per_patch)
-            row_start = slot * nchans
-            time_start = time_idx * patch_size
-            packed[
-                patch_idx,
-                row_start:row_start + nchans,
-                :,
-            ] = seg[:, time_start:time_start + patch_size]
-        meta = {
-            "nchans": nchans,
-            "n_time_patches": n_time_patches,
-            "full_chan_blocks": 0,
-            "has_overlap": False,
-            "overlap_chans": 0,
-            "small_channel_packing": True,
-            "time_blocks_per_patch": time_blocks_per_patch,
-            "patch_count": patch_count,
-        }
-        return packed.unsqueeze(1), meta
 
     patches = []
 
@@ -754,7 +822,6 @@ def split_segment_to_patches(seg, patch_size=512):
         "has_overlap": has_overlap,
         "overlap_chans": overlap_chans,
         "small_channel_packing": False,
-        "time_blocks_per_patch": 1,
         "patch_count": int(patch_tensor.shape[0]),
     }
     return patch_tensor, meta
@@ -769,6 +836,18 @@ def reconstruct_segment_mask(mask_patches, meta, patch_size=512):
     Reconstruct (nchans, seg_time) mask from (N, 512, 512) patches.
     Inverse of split_segment_to_patches.
     """
+    if meta.get("small_channel_packing", False):
+        packed_mask = reconstruct_segment_mask(
+            mask_patches,
+            meta["inner_meta"],
+            patch_size,
+        )
+        packed_mask = packed_mask[
+            : int(meta["packed_nchans"]),
+            : int(meta["packed_time"]),
+        ]
+        return restore_small_channel_segment(packed_mask, meta["packing_meta"])
+
     nchans = meta["nchans"]
     n_tp = meta["n_time_patches"]
     full_cb = meta["full_chan_blocks"]
@@ -776,19 +855,6 @@ def reconstruct_segment_mask(mask_patches, meta, patch_size=512):
 
     mask = torch.zeros(nchans, seg_time, dtype=torch.bool,
                        device=mask_patches.device)
-
-    if meta.get("small_channel_packing", False):
-        time_blocks_per_patch = int(meta["time_blocks_per_patch"])
-        for time_idx in range(n_tp):
-            patch_idx, slot = divmod(time_idx, time_blocks_per_patch)
-            row_start = slot * nchans
-            time_start = time_idx * patch_size
-            mask[:, time_start:time_start + patch_size] = mask_patches[
-                patch_idx,
-                row_start:row_start + nchans,
-                :,
-            ]
-        return mask
 
     idx = 0
     for i in range(full_cb):
@@ -1814,12 +1880,16 @@ def _run_pipeline_impl(cfg):
     t_step = time.perf_counter()
 
     patch_size = cfg["patch_size"]
+    small_channel_packing = nchans < patch_size
     target_samples = cfg["target_segment_seconds"] / tsamp
     n_patches_per_seg = max(1, int(round(target_samples / patch_size)))
     seg_len = n_patches_per_seg * patch_size
 
     n_full_segs = ntime // seg_len
     tail_len = ntime - n_full_segs * seg_len
+    process_tail = tail_len >= patch_size or (
+        small_channel_packing and tail_len > 0
+    )
     cfg["_rescale_block_len"] = seg_len
     print(f"  Segment: {seg_len} samples ({seg_len * tsamp:.3f}s), "
           f"{n_full_segs} segments + {tail_len} tail")
@@ -1841,12 +1911,21 @@ def _run_pipeline_impl(cfg):
         _median_values((raw_segs - seg_medians).abs(), dim=2, keepdim=True)
         * MAD_CONST
     )
-    science_vars, science_means = torch.var_mean(
-        raw_segs,
-        dim=2,
-        keepdim=True,
-        unbiased=True,
-    )
+    if n_full_segs > 0:
+        science_vars, science_means = torch.var_mean(
+            raw_segs,
+            dim=2,
+            keepdim=True,
+            unbiased=True,
+        )
+    else:
+        empty_stats_shape = (nchans, 0, 1)
+        science_vars = torch.empty(
+            empty_stats_shape,
+            dtype=raw_segs.dtype,
+            device=device,
+        )
+        science_means = torch.empty_like(science_vars)
     seg_stds = torch.sqrt(torch.clamp(science_vars, min=0.0))
     seg_dead = seg_stds.squeeze(2) < 1e-6
 
@@ -1980,7 +2059,7 @@ def _run_pipeline_impl(cfg):
     science_tail_degen = None
     tail_start = usable_time
     usable_tail = 0
-    if tail_len >= patch_size:
+    if process_tail:
         tail_seg = raw[:, tail_start:ntime]
         if tail_seg.dtype != raw_compute_dtype:
             tail_seg = tail_seg.to(raw_compute_dtype)
@@ -1989,7 +2068,11 @@ def _run_pipeline_impl(cfg):
             _median_values((tail_seg - tail_median).abs(), dim=1, keepdim=True)
             * MAD_CONST
         )
-        tail_std = tail_seg.std(dim=1, keepdim=True)
+        tail_std = tail_seg.std(
+            dim=1,
+            keepdim=True,
+            unbiased=tail_len > 1,
+        )
         tail_dead = tail_std.squeeze(1) < 1e-6
         tail_use_std = tail_mad < cfg["mad_min_valid"]
         tail_scale = torch.where(tail_use_std, tail_std, tail_mad)
@@ -2027,7 +2110,11 @@ def _run_pipeline_impl(cfg):
         )
 
         tail_science_mean = tail_seg.mean(dim=1, keepdim=True)
-        tail_science_std = tail_seg.std(dim=1, keepdim=True)
+        tail_science_std = tail_seg.std(
+            dim=1,
+            keepdim=True,
+            unbiased=tail_len > 1,
+        )
         safe_tail_science_std = torch.where(
             tail_science_std > 1e-6, tail_science_std, torch.ones_like(tail_science_std)
         )
@@ -2046,7 +2133,11 @@ def _run_pipeline_impl(cfg):
         ).squeeze(1)
         if z_data is not None:
             z_data[:, tail_start:ntime] = z_tail
-        usable_tail = (tail_len // patch_size) * patch_size
+        usable_tail = (
+            tail_len
+            if small_channel_packing
+            else (tail_len // patch_size) * patch_size
+        )
         _sync_device(device)
         t_neg = time.perf_counter()
         z_tail_for_nn, neg_tail_stats = replace_continuous_negative_segments(
@@ -2154,7 +2245,7 @@ def _run_pipeline_impl(cfg):
 
         science_data_no_blank = torch.zeros(nchans, ntime, dtype=torch.float32, device=device)
         science_data_no_blank[:, :usable_time] = science_segs.reshape(nchans, usable_time)
-        if tail_len >= patch_size:
+        if process_tail:
             science_data_no_blank[:, tail_start:ntime] = science_tail
         write_z_filtool_scale_filterbank_gpu(
             f"{diag_prefix}_science_meanstd_no_channel_blank_filtool_scale.fil",
@@ -2168,7 +2259,7 @@ def _run_pipeline_impl(cfg):
     science_segs[science_degenerate, :] = 0.0
     science_data = torch.zeros(nchans, ntime, dtype=torch.float32, device=device)
     science_data[:, :usable_time] = science_segs.reshape(nchans, usable_time)
-    if tail_len >= patch_size:
+    if process_tail:
         science_tail[science_tail_degen, :] = 0.0
         science_data[:, tail_start:ntime] = science_tail
         del science_tail
@@ -2249,10 +2340,32 @@ def _run_pipeline_impl(cfg):
             patches, meta = split_segment_to_patches(tanh_data[:, s, :], patch_size)
             all_patches_list.append(patches)
             all_metas.append(meta)
-        if tail_len >= patch_size:
+        if process_tail:
             patches, meta = split_segment_to_patches(tanh_tail, patch_size)
             all_patches_list.append(patches)
             all_metas.append(meta)
+
+        if small_channel_packing and all_metas:
+            packing_shapes = sorted({
+                (
+                    int(meta["original_time"]),
+                    int(meta["packed_nchans"]),
+                    int(meta["packed_time"]),
+                    int(meta["network_time"]),
+                )
+                for meta in all_metas
+            })
+            mappings = ", ".join(
+                f"[{nchans},{original_time}] -> "
+                f"[{packed_nchans},{packed_time}] -> "
+                f"[{packed_nchans},{network_time}] padded"
+                for original_time, packed_nchans, packed_time, network_time
+                in packing_shapes
+            )
+            print(
+                f"  Small-C stacking factor: {all_metas[0]['stack_factor']}; "
+                f"{mappings}"
+            )
 
         if all_patches_list:
             all_patches = torch.cat(all_patches_list, dim=0)
@@ -2271,7 +2384,7 @@ def _run_pipeline_impl(cfg):
         print("  Skipped patch splitting; NN mask is not used or requested")
 
     del tanh_data
-    if tail_len >= patch_size:
+    if process_tail:
         del tanh_tail
     _empty_cuda_cache(cfg)
 
@@ -2315,7 +2428,7 @@ def _run_pipeline_impl(cfg):
     segment_channel_flag_total = torch.zeros((), dtype=torch.float64, device=device)
     segment_channel_flag_segments = torch.zeros((), dtype=torch.float64, device=device)
     patch_offset = 0
-    n_segs_to_process = n_full_segs + (1 if tail_len >= patch_size else 0)
+    n_segs_to_process = n_full_segs + (1 if process_tail else 0)
     replacement_fill_mode = cfg.get("replacement_fill_mode", "clean_median")
     if replacement_fill_mode not in ("zero", "clean_median"):
         raise ValueError(
@@ -2336,7 +2449,7 @@ def _run_pipeline_impl(cfg):
         else:
             start = usable_time
             end = start + usable_tail
-            seg_flagged = science_tail_degen if tail_len >= patch_size else science_global_blank
+            seg_flagged = science_tail_degen if process_tail else science_global_blank
 
         seg_time = end - start
         if need_nn_inference:
@@ -2407,9 +2520,9 @@ def _run_pipeline_impl(cfg):
     del science_flagged_per_seg
 
     unprocessed_tail_start = ntime
-    if tail_len >= patch_size and tail_len > usable_tail:
+    if process_tail and tail_len > usable_tail:
         unprocessed_tail_start = usable_time + usable_tail
-    elif 0 < tail_len < patch_size:
+    elif tail_len > 0 and not process_tail:
         unprocessed_tail_start = usable_time
 
     if unprocessed_tail_start < ntime:
