@@ -10,6 +10,8 @@
 !/README.md
 !/LICENSE
 !/CITATION.cff
+!/pipeline.svg
+!/model.svg
 !/mars.py
 !/compile_tensorrt.py
 !/config.json

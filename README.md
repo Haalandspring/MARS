@@ -124,115 +124,22 @@ PyTorch FP16 path, set `tensorrt_path` back to `null`.
 
 ## Processing flow
 
-```mermaid
-%%{init: {"themeVariables": {"fontSize": "18px"}, "flowchart": {"nodeSpacing": 55, "rankSpacing": 70}}}%%
-flowchart TB
-    IN["8-bit SIGPROC filterbank<br/>frequency channels × time samples"]
+The four swimlanes show the actual execution order: MARS first generates and
+reconstructs the complete RFI mask, applies that mask to the separately prepared
+science data, and only then runs zDot, baseline removal, and output rescaling.
+Select the figure to open the full-size SVG.
 
-    subgraph LOAD["1 · Input validation and loading"]
-        direction TB
-        HDR["Read and preserve SIGPROC header"]
-        CHECK["Validate 8-bit input<br/>and at least 512 channels"]
-        GPU["Load observation to GPU<br/>raw storage: FP32 by default"]
-        HDR --> CHECK --> GPU
-    end
-
-    subgraph MASK["2 · RFI-mask branch"]
-        direction TB
-        SEG["Split into approximately 2 s segments"]
-        NORM["Robust per-channel normalization<br/>FP16 computation"]
-        PATCH["Arrange normalized data as<br/>512 × 512 model patches"]
-        BACKEND{"Inference backend selected<br/>by tensorrt_path"}
-        PT["PyTorch checkpoint<br/>FP16 autocast"]
-        TRT["Precompiled and verified<br/>TensorRT FP16 engine"]
-        LOGIT["MARS logits"]
-        THRESH["Threshold at 0.5<br/>hysteresis disabled"]
-        RECON["Reconstruct the full-observation<br/>binary RFI mask"]
-        SEG --> NORM --> PATCH --> BACKEND
-        BACKEND -->|"null"| PT --> LOGIT
-        BACKEND -->|"engine path"| TRT --> LOGIT
-        LOGIT --> THRESH --> RECON
-    end
-
-    subgraph SCIENCE["3 · Science-data mitigation branch"]
-        direction TB
-        RAW["Keep the original observation<br/>separate from normalized NN input"]
-        REPLACE["Replace mask-selected samples<br/>production mode: zero fill"]
-        ZDOT["Zero-DM projection<br/>zdot after replacement"]
-        BASE["Final time-domain baseline removal<br/>1 s window"]
-        SCALE["Filtool-style block rescaling<br/>mean 128, standard deviation 6"]
-        WRITE["Write uint8 samples with<br/>the preserved SIGPROC header"]
-        RAW --> REPLACE --> ZDOT --> BASE --> SCALE --> WRITE
-    end
-
-    OUT["Cleaned SIGPROC filterbank"]
-    IN --> HDR
-    GPU --> SEG
-    GPU --> RAW
-    RECON -->|"mask controls replacement"| REPLACE
-    WRITE --> OUT
-```
+[![MARS RFI mitigation pipeline](pipeline.svg)](pipeline.svg)
 
 ## Model flow
 
 The production model is the paper `TRTShapeUNet512` configuration: four encoder
 widths `[8, 16, 32, 64]`, morphology-aware context, additive skip connections,
 and horizontal/vertical refinement at every decoder scale. It has 270,769
-trainable parameters.
+trainable parameters. The U-shaped diagram makes spatial scales, additive skip
+connections, and decoder morphology refinement explicit.
 
-```mermaid
-%%{init: {"themeVariables": {"fontSize": "18px"}, "flowchart": {"nodeSpacing": 60, "rankSpacing": 72}}}%%
-flowchart TB
-    X["Normalized patch<br/>B × 1 × 512 × 512"]
-
-    subgraph ENCODER["Encoder · Conv 3×3 + BatchNorm + ReLU"]
-        direction TB
-        S0["Stem / skip S0<br/>B × 8 × 512 × 512"]
-        S1["Stride-2 down / skip S1<br/>B × 16 × 256 × 256"]
-        S2["Stride-2 down / skip S2<br/>B × 32 × 128 × 128"]
-        S3["Stride-2 down<br/>B × 64 × 64 × 64"]
-        S0 --> S1 --> S2 --> S3
-    end
-
-    subgraph SHAPE["Morphology-aware bottleneck · 64 channels"]
-        direction TB
-        FORK{"Three parallel RFI-shape views"}
-        LOCAL["Compact/local branch<br/>3 × 3 convolution"]
-        HOR["Horizontal branch<br/>1 × 9 convolution"]
-        VER["Vertical branch<br/>9 × 1 convolution"]
-        CONCAT["Concatenate: 192 channels"]
-        FUSE["1 × 1 fusion: 192 → 64<br/>plus residual input"]
-        FORK --> LOCAL --> CONCAT
-        FORK --> HOR --> CONCAT
-        FORK --> VER --> CONCAT
-        CONCAT --> FUSE
-    end
-
-    subgraph DECODER["Full-resolution additive decoder"]
-        direction TB
-        U2["Nearest upsample + 1×1 projection<br/>add skip S2 + 3×3 refine<br/>B × 32 × 128 × 128"]
-        U2H["Horizontal morphology refine<br/>1 × 31 then 3 × 3 + residual"]
-        U2V["Vertical morphology refine<br/>31 × 1 then 3 × 3 + residual"]
-        U1["Nearest upsample + 1×1 projection<br/>add skip S1 + 3×3 refine<br/>B × 16 × 256 × 256"]
-        U1H["Horizontal morphology refine<br/>1 × 31 then 3 × 3 + residual"]
-        U1V["Vertical morphology refine<br/>31 × 1 then 3 × 3 + residual"]
-        U0["Nearest upsample + 1×1 projection<br/>add skip S0 + 3×3 refine<br/>B × 8 × 512 × 512"]
-        U0H["Horizontal morphology refine<br/>1 × 31 then 3 × 3 + residual"]
-        U0V["Vertical morphology refine<br/>31 × 1 then 3 × 3 + residual"]
-        U2 --> U2H --> U2V --> U1 --> U1H --> U1V --> U0 --> U0H --> U0V
-    end
-
-    HEAD["1 × 1 segmentation head<br/>B × 1 × 512 × 512 logits"]
-    MASKOUT["Thresholded binary RFI mask"]
-
-    X --> S0
-    S3 --> FORK
-    FUSE --> U2
-    S2 -.-> U2
-    S1 -.-> U1
-    S0 -.-> U0
-    U0V --> HEAD --> MASKOUT
-```
+[![MARS morphology-aware U-Net model](model.svg)](model.svg)
 
 ## Supported inputs
 
@@ -252,6 +159,8 @@ compile_tensorrt.py    config-driven FP16 TensorRT compiler and verifier
 config.json            all user-selectable mitigation options
 requirements.txt       runtime dependencies
 src/mars_rfi/          minimal runtime and TensorRT implementation
+pipeline.svg           full-size mitigation swimlane diagram
+model.svg              full-size morphology-aware U-Net diagram
 artifacts/checkpoints/mars-paper-historical/best_f1.pt
                        production checkpoint required by mars.py
 ```
