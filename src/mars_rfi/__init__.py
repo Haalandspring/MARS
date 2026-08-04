@@ -2,7 +2,6 @@
 
 Core model and mitigation symbols are loaded lazily so importing package
 metadata does not initialize the optional filterbank/CUDA runtime.
-Operational search helpers live in :mod:`mars_rfi.search`.
 """
 
 _MODEL_EXPORTS = {

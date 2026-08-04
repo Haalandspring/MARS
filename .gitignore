@@ -1,76 +1,39 @@
-# Local analysis and editor state
-.codex_work/
-.idea/
-.vscode/
-
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.pytest_cache/
-.pytest_tmp/
-pytest-of-*/
-.ruff_cache/
-.mypy_cache/
-.venv/
-venv/
-build/
-dist/
-
-# Scientific data and generated results
-*.fil
-*.npy
-*.npz
-*.pt
-*.pth
-*.safetensors
-*.onnx
-*.engine
-*.plan
-*.jsonl
-*.h5
-*.hdf5
-*.fits
-*.parquet
-*.zarr/
-*.dat
-*.fft
-*.inf
-*.cand
-*.txtcand
-*_ACCEL_*
-results/
-outputs/
-search_outputs/
-
-# Preserve documentation inside otherwise generated directories
-artifacts/*
-!artifacts/README.md
-data/*
-!data/README.md
-
-# Private research-validation workspace
+# Public repository allowlist
 #
-# These files are kept locally for auditing the article, but they are not part
-# of the public mitigation package or the normal test suite.
-/paper_validation/
-/src/mars_rfi/paper_validation/
-/tests/paper_validation/
-/src/mars_rfi/migration/
-/tests/migration/
-/reproduction/
-/configs/benchmarks/
-/configs/pipeline/paper.json
-/configs/train/paper.json
-/configs/train/no_astro.json
-/configs/train/no_decoder_refinement.json
-/configs/train/no_horizontal_refinement.json
-/configs/train/no_vertical_refinement.json
-/docs/paper-code-differences.md
-/docs/paper-specification.md
-/docs/reproducibility.md
-/environments/requirements-paper.txt
+# MARS is intentionally published only as a directly runnable mitigation and
+# TensorRT-compilation pipeline. Everything is ignored unless explicitly
+# allowed below. Ignored files remain available in the local research checkout.
+/*
 
-# Logs and scheduler output
-*.log
-slurm-*.out
+# Root runtime, documentation, and legal files
+!/.gitignore
+!/README.md
+!/LICENSE
+!/CITATION.cff
+!/mars.py
+!/compile_tensorrt.py
+!/config.json
+!/requirements.txt
+
+# The one production checkpoint required for immediate PyTorch use
+!/artifacts/
+/artifacts/*
+!/artifacts/checkpoints/
+/artifacts/checkpoints/*
+!/artifacts/checkpoints/mars-paper-historical/
+/artifacts/checkpoints/mars-paper-historical/*
+!/artifacts/checkpoints/mars-paper-historical/best_f1.pt
+
+# Minimal source required by mars.py and compile_tensorrt.py
+!/src/
+/src/*
+!/src/mars_rfi/
+/src/mars_rfi/*
+!/src/mars_rfi/__init__.py
+!/src/mars_rfi/config.py
+!/src/mars_rfi/export_tensorrt.py
+!/src/mars_rfi/mitigate.py
+!/src/mars_rfi/model.py
+!/src/mars_rfi/pipeline.py
+!/src/mars_rfi/preprocess.py
+!/src/mars_rfi/provenance.py

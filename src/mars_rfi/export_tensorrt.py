@@ -8,18 +8,10 @@ Pipeline:
 The generated engine uses tensor names ``input`` and ``output`` to match
 ``mars_rfi.pipeline.TRTInferenceContext``.
 
-Run:
-
-    mars-export-tensorrt --checkpoint artifacts/checkpoints/mars-paper/best_f1.pt
-
-Or override selected values from the command line:
-
-    mars-export-tensorrt \
-        --checkpoint artifacts/checkpoints/mars-paper/best_f1.pt \
-        --batch-size 64 \
-        --precision fp16
-
-Pass the resulting ``.engine`` path to ``mars-mitigate --tensorrt-engine``.
+Normal source-checkout users should run ``python compile_tensorrt.py`` from the
+repository root. That wrapper reads the checkpoint, batch size, and FP16 build
+settings from ``config.json``. This lower-level module retains explicit options
+for implementation testing and advanced development work.
 """
 
 from __future__ import annotations
@@ -644,7 +636,7 @@ def main(argv: list[str] | None = None) -> None:
 
     print(f"\nDone. TensorRT engine: {engine_path}")
     print(f"Artifact metadata: {metadata_path}")
-    print("Pass this path to `mars-mitigate --tensorrt-engine ...`.")
+    print("Set config.json `tensorrt_path` to this engine before running mars.py.")
 
 
 if __name__ == "__main__":

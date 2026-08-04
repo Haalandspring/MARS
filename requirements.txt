@@ -1,0 +1,81 @@
+# Fully locked MARS + TensorRT environment.
+# Validated on Linux x86-64, Python 3.13, CUDA 13, and an NVIDIA GPU.
+# The NVIDIA driver is a system prerequisite and cannot be installed by pip.
+
+# Direct MARS dependencies
+numpy==2.4.2
+torch==2.11.0
+tqdm==4.67.3
+sigpyproc @ git+https://github.com/FRBs/sigpyproc3@b31ef20fa13bb97e2caa244f65a4dfa377d6945a
+
+# ONNX export and TensorRT FP16 compilation/runtime
+onnx==1.21.0
+onnx-ir==0.2.1
+onnxscript==0.7.0
+tensorrt==10.15.1.29
+tensorrt_cu13==10.15.1.29
+tensorrt_cu13_bindings==10.15.1.29
+tensorrt_cu13_libs==10.15.1.29
+
+# Locked PyTorch CUDA 13 runtime
+cuda-bindings==13.3.1
+cuda-pathfinder==1.6.0
+cuda-toolkit==13.0.2
+nvidia-cublas==13.1.0.3
+nvidia-cuda-cupti==13.0.85
+nvidia-cuda-nvrtc==13.0.88
+nvidia-cuda-runtime==13.0.96
+nvidia-cudnn-cu13==9.19.0.56
+nvidia-cufft==12.0.0.61
+nvidia-cufile==1.15.1.6
+nvidia-curand==10.4.0.35
+nvidia-cusolver==12.0.4.66
+nvidia-cusparse==12.6.3.3
+nvidia-cusparselt-cu13==0.8.0
+nvidia-nccl-cu13==2.28.9
+nvidia-nvjitlink==13.0.88
+nvidia-nvshmem-cu13==3.4.5
+nvidia-nvtx==13.0.85
+triton==3.6.0
+
+# Locked Python transitive dependencies
+astropy==8.0.1
+astropy-iers-data==0.2026.8.3.0.53.6
+attrs==26.1.0
+bidict==0.23.1
+Bottleneck==1.6.0
+click==8.4.2
+contourpy==1.3.3
+cycler==0.12.1
+filelock==3.32.2
+fonttools==4.63.0
+fsspec==2026.7.0
+h5py==3.16.0
+Jinja2==3.1.6
+kiwisolver==1.5.0
+llvmlite==0.48.0
+markdown-it-py==4.2.0
+MarkupSafe==3.0.3
+matplotlib==3.11.1
+mdurl==0.1.2
+ml_dtypes==0.5.4
+mpmath==1.3.0
+networkx==3.6.1
+numba==0.66.0
+packaging==26.2
+pandas==3.0.5
+pillow==12.3.0
+protobuf==7.35.1
+pyerfa==2.0.1.5
+Pygments==2.20.0
+pyparsing==3.3.2
+python-dateutil==2.9.0.post0
+PyYAML==6.0.3
+rich==15.0.0
+rich-click==1.9.8
+rocket-fft==0.3.1
+seaborn==0.13.2
+setuptools==81.0.0
+six==1.17.0
+sympy==1.14.0
+typing_extensions==4.16.0

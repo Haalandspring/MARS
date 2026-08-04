@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""Simple source-checkout entry point for MARS RFI mitigation."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import sys
+from typing import Any
+
+
+ROOT = Path(__file__).resolve().parent
+SOURCE_DIR = ROOT / "src"
+DEFAULT_CONFIG = ROOT / "config.json"
+ARTIFACT_PATH_KEYS = ("checkpoint", "tensorrt_path")
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Remove RFI from one 8-bit SIGPROC filterbank with MARS.",
+    )
+    parser.add_argument(
+        "-f",
+        "--filterbank",
+        required=True,
+        type=Path,
+        help="Input 8-bit SIGPROC .fil file.",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        required=True,
+        type=Path,
+        help=(
+            "Output .fil file or output directory. A directory produces "
+            "<input>_mars.fil."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
+def load_config(path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
+    if not path.is_file():
+        raise FileNotFoundError(f"MARS configuration not found: {path}")
+    with path.open(encoding="utf-8") as handle:
+        config = json.load(handle)
+    if not isinstance(config, dict):
+        raise TypeError(f"MARS configuration must contain a JSON object: {path}")
+
+    # Artifact paths in config.json are relative to the downloaded repository,
+    # not to the shell's current working directory.
+    for key in ARTIFACT_PATH_KEYS:
+        value = config.get(key)
+        if value:
+            artifact = Path(value).expanduser()
+            if not artifact.is_absolute():
+                artifact = ROOT / artifact
+            config[key] = str(artifact.resolve())
+    return config
+
+
+def resolve_output_path(input_path: Path, output_argument: Path) -> Path:
+    output = output_argument.expanduser()
+    if not output.is_absolute():
+        output = Path.cwd() / output
+    if output.is_dir() or output.suffix.lower() != ".fil":
+        output = output / f"{input_path.stem}_mars.fil"
+    return output.resolve()
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    input_path = args.filterbank.expanduser().resolve()
+    output_path = resolve_output_path(input_path, args.output)
+
+    if not input_path.is_file():
+        raise FileNotFoundError(f"Input filterbank not found: {input_path}")
+
+    config = load_config()
+    sys.path.insert(0, str(SOURCE_DIR))
+    try:
+        from mars_rfi.mitigate import mitigate_filterbank
+    except ModuleNotFoundError as exc:
+        missing = exc.name or "unknown dependency"
+        raise SystemExit(
+            f"Missing Python dependency: {missing}. "
+            "Run: python -m pip install -r requirements.txt"
+        ) from exc
+
+    print(f"MARS config: {DEFAULT_CONFIG}")
+    print(f"Input:       {input_path}")
+    print(f"Output:      {output_path}")
+    timings = mitigate_filterbank(
+        input_path,
+        output_path,
+        config=config,
+    )
+    total = timings.get("total")
+    if total is not None:
+        print(f"MARS completed in {float(total):.3f} s")
+    else:
+        print("MARS completed successfully")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

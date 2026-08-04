@@ -179,8 +179,8 @@ def validate_config(config: dict) -> None:
         return
     if not checkpoint or not Path(checkpoint).is_file():
         raise FileNotFoundError(
-            "Provide an existing --checkpoint or --tensorrt-engine. "
-            "The paper artifacts are not bundled in this source snapshot."
+            "Set checkpoint or tensorrt_path in config.json to an existing "
+            "model artifact. Model binaries are distributed separately."
         )
 
 

@@ -2687,4 +2687,4 @@ def run_pipeline(cfg):
 
 
 if __name__ == "__main__":
-    raise SystemExit("Use `mars-mitigate --help` to run the pipeline.")
+    raise SystemExit("Run `python mars.py -f INPUT.fil -o OUTPUT.fil` from the repository.")
