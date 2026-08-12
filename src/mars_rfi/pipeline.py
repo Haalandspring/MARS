@@ -1883,6 +1883,17 @@ def _run_pipeline_impl(cfg):
     small_channel_packing = nchans < patch_size
     target_samples = cfg["target_segment_seconds"] / tsamp
     n_patches_per_seg = max(1, int(round(target_samples / patch_size)))
+    stacking_factor = 1
+    if small_channel_packing:
+        # One packed 512-wide model patch represents ``stacking_factor``
+        # consecutive 512-sample slabs in the original time axis.  Align full
+        # segments to that quantum so normal segments do not need artificial
+        # right-padding after time-to-frequency stacking.  Only a final,
+        # inherently incomplete observation tail may still require padding.
+        stacking_factor = math.ceil(patch_size / nchans)
+        n_patches_per_seg = (
+            math.ceil(n_patches_per_seg / stacking_factor) * stacking_factor
+        )
     seg_len = n_patches_per_seg * patch_size
 
     n_full_segs = ntime // seg_len
@@ -1893,6 +1904,11 @@ def _run_pipeline_impl(cfg):
     cfg["_rescale_block_len"] = seg_len
     print(f"  Segment: {seg_len} samples ({seg_len * tsamp:.3f}s), "
           f"{n_full_segs} segments + {tail_len} tail")
+    if small_channel_packing:
+        print(
+            f"  Small-C segment alignment: {patch_size * stacking_factor} samples "
+            f"({patch_size} x stacking factor {stacking_factor})"
+        )
     if cfg.get("raw_segment_detector_enabled", False):
         print(f"  Raw segment detector mode: {cfg.get('raw_segment_detector_mode', 'guarded')}")
 
@@ -2355,13 +2371,19 @@ def _run_pipeline_impl(cfg):
                 )
                 for meta in all_metas
             })
-            mappings = ", ".join(
-                f"[{nchans},{original_time}] -> "
-                f"[{packed_nchans},{packed_time}] -> "
-                f"[{packed_nchans},{network_time}] padded"
-                for original_time, packed_nchans, packed_time, network_time
-                in packing_shapes
-            )
+            mapping_labels = []
+            for original_time, packed_nchans, packed_time, network_time in packing_shapes:
+                padding_label = (
+                    f"padded by {network_time - packed_time} time samples"
+                    if network_time != packed_time
+                    else "no padding"
+                )
+                mapping_labels.append(
+                    f"[{nchans},{original_time}] -> "
+                    f"[{packed_nchans},{packed_time}] -> "
+                    f"[{packed_nchans},{network_time}] ({padding_label})"
+                )
+            mappings = ", ".join(mapping_labels)
             print(
                 f"  Small-C stacking factor: {all_metas[0]['stack_factor']}; "
                 f"{mappings}"
