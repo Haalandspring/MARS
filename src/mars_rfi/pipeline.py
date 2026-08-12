@@ -268,6 +268,14 @@ CONFIG = {
     "final_baseline_enabled": True,
     "baseline_width":     1.0,   # seconds
     "baseline_channel_chunk": 256,
+    # Opt in per run through mars.py --baseline-streaming.  This internal
+    # default preserves the historical one-shot behavior for library callers.
+    "baseline_median_streaming_enabled": False,
+    # Bound the temporary [time, median-window] workspace.  The running median
+    # is evaluated in exact haloed time chunks, so this changes memory use but
+    # not the numerical result.  A whole-observation unfold can exceed 100 GiB
+    # for high-time-resolution filterbanks.
+    "baseline_median_workspace_mb": 256,
     # RFI replacement in the science branch. `zero` matches filtool's default
     # z-domain mean fill after equalization; `clean_median` is the previous
     # per-channel clean-median constant replacement.
@@ -1049,17 +1057,27 @@ def apply_zdot_gpu(z_data, live_mask, cfg, label="zdot", verbose=True, return_ba
 # GPU: baseline removal
 # =============================================================================
 
-def running_median_1d_gpu(x, window):
+def running_median_1d_gpu(
+    x,
+    window,
+    *,
+    streaming_enabled=True,
+    workspace_mb=256,
+    return_chunk_size=False,
+):
     """
-    Exact 1D running median on GPU using reflect padding.
+    Exact 1D running median on GPU using reflect padding, optionally streamed.
 
-    The baseline profile is only one time series, so the unfolded window tensor
-    is modest compared with the full filterbank and avoids the old CPU scipy
-    median_filter round trip.
+    ``Tensor.unfold`` is a view, but CUDA median materializes substantial
+    temporary storage proportional to ``ntime * window``.  High-time-resolution
+    observations can therefore request hundreds of GiB even though the source
+    profile itself is small.  Process disjoint output chunks with the complete
+    left/right halo from one globally reflect-padded profile.  Every output
+    window is identical to the former one-shot implementation.
     """
     n = x.numel()
     if n <= 1 or window <= 1:
-        return x
+        return (x, n) if return_chunk_size else x
 
     window = max(1, int(window))
     if window % 2 == 0:
@@ -1067,12 +1085,39 @@ def running_median_1d_gpu(x, window):
     if window > n:
         window = n if n % 2 == 1 else n - 1
     if window <= 1:
-        return x
+        return (x, n) if return_chunk_size else x
 
     pad = window // 2
     y = F.pad(x.view(1, 1, -1), (pad, pad), mode="reflect")
-    windows = y.unfold(2, window, 1)
-    return _median_values(windows, dim=-1).view(-1)
+    if not streaming_enabled:
+        windows = y.unfold(2, window, 1)
+        result = _median_values(windows, dim=-1).reshape(-1)
+        if return_chunk_size:
+            return result, n
+        return result
+
+    workspace_bytes = max(1, int(float(workspace_mb) * 1024 * 1024))
+    elements_per_window = max(1, window)
+    output_chunk = max(
+        1,
+        workspace_bytes // (elements_per_window * max(1, x.element_size())),
+    )
+    output_chunk = min(n, output_chunk)
+    result = torch.empty_like(x)
+
+    for start in range(0, n, output_chunk):
+        end = min(start + output_chunk, n)
+        # In the globally padded coordinates, output sample t uses
+        # y[t:t+window].  Include exactly that halo for this output chunk.
+        local = y[:, :, start:end + window - 1]
+        windows = local.unfold(2, window, 1)
+        result[start:end] = _median_values(windows, dim=-1).reshape(-1)
+        del local, windows
+
+    del y
+    if return_chunk_size:
+        return result, output_chunk
+    return result
 
 
 def remove_baseline_gpu(z_data, live_mask, fully_flagged, cfg, verbose=True):
@@ -1101,7 +1146,28 @@ def remove_baseline_gpu(z_data, live_mask, fully_flagged, cfg, verbose=True):
         s_raw += (rows * weights).sum(dim=0)
     s_raw /= live_count
 
-    s = running_median_1d_gpu(s_raw, baseline_window).to(torch.float64)
+    s, median_time_chunk = running_median_1d_gpu(
+        s_raw,
+        baseline_window,
+        streaming_enabled=cfg.get("baseline_median_streaming_enabled", False),
+        workspace_mb=cfg.get("baseline_median_workspace_mb", 256),
+        return_chunk_size=True,
+    )
+    s = s.to(torch.float64)
+    if verbose:
+        n_median_chunks = math.ceil(ntime / max(1, median_time_chunk))
+        if cfg.get("baseline_median_streaming_enabled", False):
+            print(
+                "  Baseline median mode: streaming; "
+                f"time_chunk={median_time_chunk}, chunks={n_median_chunks}, "
+                f"workspace<={float(cfg.get('baseline_median_workspace_mb', 256)):.0f} MiB"
+            )
+        else:
+            estimated_gib = ntime * baseline_window * s_raw.element_size() / 2**30
+            print(
+                "  Baseline median mode: one-shot; "
+                f"estimated window workspace={estimated_gib:.2f} GiB"
+            )
 
     # Per-channel linear regression (vectorized)
     se = s.sum()

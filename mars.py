@@ -37,6 +37,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "<input>_mars.fil."
         ),
     )
+    parser.add_argument(
+        "--baseline-streaming",
+        "-baseline_streaming",
+        action="store_true",
+        help=(
+            "Compute the exact baseline running median in bounded-memory time "
+            "chunks. Recommended for large or high-time-resolution filterbanks."
+        ),
+    )
+    parser.add_argument(
+        "--baseline-streaming-workspace-mb",
+        "-baseline_streaming_workspace_mb",
+        type=float,
+        metavar="MIB",
+        help=(
+            "Approximate baseline streaming workspace in MiB "
+            "(default: 256; requires --baseline-streaming)."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -78,6 +97,21 @@ def main(argv: list[str] | None = None) -> int:
         raise FileNotFoundError(f"Input filterbank not found: {input_path}")
 
     config = load_config()
+    if args.baseline_streaming_workspace_mb is not None:
+        if not args.baseline_streaming:
+            raise ValueError(
+                "--baseline-streaming-workspace-mb requires --baseline-streaming"
+            )
+        if args.baseline_streaming_workspace_mb <= 0:
+            raise ValueError("--baseline-streaming-workspace-mb must be greater than zero")
+    # This feature is intentionally controlled per invocation, not by
+    # config.json. Absence of the flag always selects the historical one-shot
+    # running median even if an old local config still contains this key.
+    config["baseline_median_streaming_enabled"] = bool(args.baseline_streaming)
+    if args.baseline_streaming_workspace_mb is not None:
+        config["baseline_median_workspace_mb"] = float(
+            args.baseline_streaming_workspace_mb
+        )
     sys.path.insert(0, str(SOURCE_DIR))
     try:
         from mars_rfi.mitigate import mitigate_filterbank
