@@ -278,7 +278,9 @@ CONFIG = {
     "baseline_median_workspace_mb": 256,
     # RFI replacement in the science branch. `zero` matches filtool's default
     # z-domain mean fill after equalization; `clean_median` is the previous
-    # per-channel clean-median constant replacement.
+    # per-channel clean-median constant replacement. `local_gaussian` is an
+    # opt-in experimental ablation that matches the clean channel-segment mean
+    # and variance instead of creating a repeated constant-valued window.
     # Set to False for ablations where the NN mask is diagnosed but not used
     # for replacement. Segment/raw persistent blanking is still applied.
     "use_nn_mask_for_replacement": True,
@@ -286,7 +288,8 @@ CONFIG = {
     # not used. Enable this for true non-NN science-branch tests.
     "skip_nn_when_unused": False,
     "force_run_nn_inference": False,
-    "replacement_fill_mode": "zero",  # zero | clean_median
+    "replacement_fill_mode": "zero",  # zero | clean_median | local_gaussian
+    "replacement_noise_std_scale": 0.25,
     # With block/global rescale, z=0 is close to but not guaranteed to become
     # exactly out_mean. Keep masked output pixels exactly at 128 for PRESTO.
     "replacement_force_output_mean": True,
@@ -2518,10 +2521,25 @@ def _run_pipeline_impl(cfg):
     patch_offset = 0
     n_segs_to_process = n_full_segs + (1 if process_tail else 0)
     replacement_fill_mode = cfg.get("replacement_fill_mode", "clean_median")
-    if replacement_fill_mode not in ("zero", "clean_median"):
+    if replacement_fill_mode not in ("zero", "clean_median", "local_gaussian"):
         raise ValueError(
-            "replacement_fill_mode must be one of: zero, clean_median "
+            "replacement_fill_mode must be one of: zero, clean_median, "
+            "local_gaussian "
             f"(got {replacement_fill_mode!r})"
+        )
+    if replacement_fill_mode == "local_gaussian" and force_masked_output_mean:
+        raise ValueError(
+            "local_gaussian replacement requires "
+            "replacement_force_output_mean=false; otherwise the generated "
+            "samples would be overwritten by a constant after rescaling"
+        )
+    replacement_noise_std_scale = float(
+        cfg.get("replacement_noise_std_scale", 0.25)
+    )
+    if replacement_noise_std_scale < 0.0:
+        raise ValueError(
+            "replacement_noise_std_scale must be non-negative "
+            f"(got {replacement_noise_std_scale})"
         )
     zero_fill = torch.zeros((), dtype=science_data.dtype, device=device)
     print(f"  Replacement fill mode: {replacement_fill_mode}")
@@ -2578,7 +2596,7 @@ def _run_pipeline_impl(cfg):
         science_seg = science_data[:, start:end]
         if replacement_fill_mode == "zero":
             science_data[:, start:end] = torch.where(combined, zero_fill, science_seg)
-        else:
+        elif replacement_fill_mode == "clean_median":
             # Per-channel clean median replacement (constant, no noise).
             work = torch.where(combined, torch.tensor(float('inf'), device=device), science_seg)
             n_clean = (~combined).sum(dim=1)
@@ -2595,6 +2613,41 @@ def _run_pipeline_impl(cfg):
 
             science_data[:, start:end] = torch.where(combined, ch_medians.unsqueeze(1), science_seg)
             del work, work_sorted
+        else:
+            # Experimental replacement ablation: match each channel-segment's
+            # clean mean and variance so periodic masked intervals do not become
+            # a repeated constant-valued window. The inference seed makes this
+            # stochastic fill reproducible within a fixed runtime profile.
+            clean = ~combined
+            n_clean = clean.sum(dim=1)
+            clean_f = clean.to(torch.float32)
+            science_f = science_seg.to(torch.float32)
+            safe_n = n_clean.clamp(min=1).to(torch.float32)
+            ch_means = (science_f * clean_f).sum(dim=1) / safe_n
+            residual = (science_f - ch_means.unsqueeze(1)) * clean_f
+            ch_vars = residual.square().sum(dim=1) / safe_n
+            ch_stds = torch.sqrt(torch.clamp(ch_vars, min=1e-6))
+
+            few_clean = n_clean < 10
+            ch_means = torch.where(few_clean, torch.zeros_like(ch_means), ch_means)
+            # Channels/segments without a trustworthy clean reference remain
+            # at the normalized mean. Do not synthesize apparently valid noise
+            # inside wholly blanked or unusable channels.
+            ch_stds = torch.where(few_clean, torch.zeros_like(ch_stds), ch_stds)
+            noise = torch.randn(
+                science_seg.shape,
+                device=device,
+                dtype=torch.float32,
+            )
+            noise = ch_means.unsqueeze(1) + noise * (
+                ch_stds.unsqueeze(1) * replacement_noise_std_scale
+            )
+            science_data[:, start:end] = torch.where(
+                combined,
+                noise.to(science_seg.dtype),
+                science_seg,
+            )
+            del clean, clean_f, science_f, residual, noise
         if track_combined_mask:
             full_mask[:, start:end] = combined
         if save_nn_mask:
