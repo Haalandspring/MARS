@@ -69,9 +69,11 @@ Edit `config.json` before running. Important options include:
 | `tensorrt_path` | Verified TensorRT engine; set to `null` for PyTorch. |
 | `batch_size` | Patch inference batch size. |
 | `threshold` | Binary RFI-mask threshold. |
+| `target_segment_seconds` | Requested normalization-segment duration. |
 | `small_channel_packing_enabled` | Stack time slabs along frequency when `C < 512`. |
 | `raw_compute_dtype` | Pre/post-processing precision; default `float16`. |
 | `hys_enabled` | Enable or disable mask hysteresis. |
+| `segment_channel_flag_ratio` | Mask-occupancy fraction that flags a channel within a segment. |
 | `science_zdot` | Enable the zero-DM projection. |
 | `science_zdot_stage` | Apply `zdot` before or after replacement. |
 | `replacement_fill_mode` | Replacement strategy for masked samples. |
@@ -80,9 +82,16 @@ Edit `config.json` before running. Important options include:
 | `rescale_mode` | Output rescaling method. |
 | `write_mask_files` | Optionally write diagnostic mask filterbanks. |
 
-The supplied production configuration uses FP16 computation, disables
-hysteresis, enables `zdot` after RFI replacement, applies baseline removal, and
-uses Filtool-style block rescaling.
+The supplied production configuration uses the verified FP16 TensorRT engine
+and the validated low-FP mitigation profile: 4 s normalization segments, a
+0.15 segment-channel flag ratio, mild hysteresis, local-Gaussian replacement
+at unit clean-noise scale, post-replacement `zdot`, baseline removal, and
+Filtool-style block rescaling.
+
+To use the same bounded-memory baseline path as the validation batch, add
+`--baseline-streaming`; its configured workspace is 4096 MiB. Streaming is
+numerically equivalent to the one-shot running median and only changes memory
+use and runtime.
 
 ### TensorRT FP16
 
