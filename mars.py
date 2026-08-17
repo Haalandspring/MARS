@@ -38,6 +38,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "-c",
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG,
+        help=f"MARS JSON configuration (default: {DEFAULT_CONFIG}).",
+    )
+    parser.add_argument(
         "--baseline-streaming",
         "-baseline_streaming",
         action="store_true",
@@ -92,11 +99,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     input_path = args.filterbank.expanduser().resolve()
     output_path = resolve_output_path(input_path, args.output)
+    config_path = args.config.expanduser().resolve()
 
     if not input_path.is_file():
         raise FileNotFoundError(f"Input filterbank not found: {input_path}")
 
-    config = load_config()
+    config = load_config(config_path)
     if args.baseline_streaming_workspace_mb is not None:
         if not args.baseline_streaming:
             raise ValueError(
@@ -122,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
             "Run: python -m pip install -r requirements.txt"
         ) from exc
 
-    print(f"MARS config: {DEFAULT_CONFIG}")
+    print(f"MARS config: {config_path}")
     print(f"Input:       {input_path}")
     print(f"Output:      {output_path}")
     timings = mitigate_filterbank(
