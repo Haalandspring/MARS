@@ -60,7 +60,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="MIB",
         help=(
             "Approximate baseline streaming workspace in MiB "
-            "(default: 256; requires --baseline-streaming)."
+            "(default: baseline_median_workspace_mb in the configuration; "
+            "requires --baseline-streaming)."
         ),
     )
     return parser.parse_args(argv)

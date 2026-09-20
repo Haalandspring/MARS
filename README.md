@@ -56,12 +56,10 @@ artifacts/checkpoints/mars-paper-historical/best_f1.pt
 
 Its SHA-256 is
 `3acf3997bd83a8836e512974a2093bce319ede7f47ce3868757df545c4bd69a4`.
-After installing the dependencies, run MARS directly from the repository:
-
-For the first run, set `"tensorrt_path": null` in `config.json` to use the
-included PyTorch checkpoint. The supplied configuration points to a locally
-compiled TensorRT engine, which is not distributed in the repository. To use
-TensorRT, first follow the [compilation instructions](#tensorrt-fp16) below.
+The supplied configuration sets `"tensorrt_path": null` and uses the included
+PyTorch checkpoint, so the first run does not require a locally compiled
+TensorRT engine. After installing the dependencies, run MARS directly from the
+repository:
 
 ```bash
 python mars.py \
@@ -69,8 +67,12 @@ python mars.py \
   -o /path/to/observation_mars.fil
 ```
 
-Only `-f` and `-o` are command-line options. Every processing option is kept in
-[`config.json`](config.json).
+`-f` and `-o` are required. Processing settings are kept in
+[`config.json`](config.json); use `-c /path/to/config.json` to select another
+configuration. Relative checkpoint and engine paths are resolved from the
+MARS repository directory, including when using a custom configuration.
+`--baseline-streaming` and `--baseline-streaming-workspace-mb` control baseline
+memory use for a particular run. See `python mars.py --help` for all options.
 
 If `-o` ends in `.fil`, it is used as the output filename. Otherwise it is
 treated as an output directory:
@@ -104,8 +106,8 @@ Edit `config.json` before running. Important options include:
 | `rescale_mode` | Output rescaling method. |
 | `write_mask_files` | Optionally write diagnostic mask filterbanks. |
 
-The supplied production configuration uses the verified FP16 TensorRT engine
-and the validated low-FP mitigation profile: 4 s normalization segments, a
+The supplied production configuration uses PyTorch FP16 inference and the
+validated low-FP mitigation profile: 4 s normalization segments, a
 0.15 segment-channel flag ratio, mild hysteresis, local-Gaussian replacement
 at unit clean-noise scale, post-replacement `zdot`, baseline removal, and
 Filtool-style block rescaling.

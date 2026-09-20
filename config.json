@@ -1,7 +1,7 @@
 {
   "profile": "mars-production-fp16-v1",
   "checkpoint": "artifacts/checkpoints/mars-paper-historical/best_f1.pt",
-  "tensorrt_path": "artifacts/tensorrt/mars-fp16.engine",
+  "tensorrt_path": null,
   "tensorrt_build": {
     "engine_path": "artifacts/tensorrt/mars-fp16.engine",
     "precision": "fp16",
