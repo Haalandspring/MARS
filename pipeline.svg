@@ -1,159 +1,155 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="950" viewBox="0 0 1800 950" role="img" aria-labelledby="title desc">
-  <title id="title">MARS RFI mitigation pipeline</title>
-  <desc id="desc">The input filterbank is validated and loaded to the GPU. One branch generates and reconstructs the complete RFI mask, while a separate branch prepares the science samples. The mask is then applied during replacement, followed by zero-DM projection, baseline removal, block rescaling, and filterbank output.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1290" viewBox="0 0 1800 1290" role="img" aria-labelledby="title desc">
+  <title id="title">MARS RFI mitigation processing flow</title>
+  <desc id="desc">Processing flow for the supplied config.json. An 8-bit SIGPROC filterbank is validated, its header retained, and its samples loaded to the GPU. Segments feed separate neural-input and science-sample branches. The neural branch uses median/MAD normalization, blank and negative handling, tanh compression, small-channel packing when needed, and 512 by 512 patches. PyTorch or verified TensorRT inference produces logits; thresholding with hysteresis produces masks, which are reconstructed in native segment coordinates. These masks are combined with channel flags before local-Gaussian replacement of the mean/std-normalized science samples. Post-replacement zero-DM projection, baseline removal, block rescaling and uint8 output follow. Segment reconstruction and replacement are performed together per segment; a complete observation-wide mask need not be stored.</desc>
   <defs>
-    <linearGradient id="page" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#f8fafc"/>
-      <stop offset="1" stop-color="#eef2ff"/>
-    </linearGradient>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#0f172a" flood-opacity="0.12"/>
-    </filter>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-      <path d="M0 0 L10 5 L0 10 z" fill="#334155"/>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="strokeWidth">
+      <path d="M 0 1 L 9 5 L 0 9 Z" fill="#263238" />
     </marker>
-    <marker id="mask-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-      <path d="M0 0 L10 5 L0 10 z" fill="#7c3aed"/>
-    </marker>
-    <style>
-      .title { font: 700 38px Inter, "Segoe UI", Arial, sans-serif; fill: #0f172a; }
-      .subtitle { font: 400 20px Inter, "Segoe UI", Arial, sans-serif; fill: #475569; }
-      .lane-title { font: 700 22px Inter, "Segoe UI", Arial, sans-serif; fill: #ffffff; }
-      .lane-number { font: 700 38px Inter, "Segoe UI", Arial, sans-serif; fill: #ffffff; opacity: 0.35; }
-      .node-title { font: 700 20px Inter, "Segoe UI", Arial, sans-serif; fill: #0f172a; text-anchor: middle; }
-      .node-title-small { font: 700 18px Inter, "Segoe UI", Arial, sans-serif; fill: #0f172a; text-anchor: middle; }
-      .node-copy { font: 400 16px Inter, "Segoe UI", Arial, sans-serif; fill: #475569; text-anchor: middle; }
-      .tag { font: 700 13px Inter, "Segoe UI", Arial, sans-serif; fill: #ffffff; text-anchor: middle; letter-spacing: 0.5px; }
-      .arrow { fill: none; stroke: #334155; stroke-width: 4; marker-end: url(#arrow); }
-      .branch { fill: none; stroke: #64748b; stroke-width: 3.5; marker-end: url(#arrow); }
-      .mask-link { fill: none; stroke: #7c3aed; stroke-width: 4; stroke-dasharray: 11 8; marker-end: url(#mask-arrow); }
-    </style>
+    <style>text { font-family: "DejaVu Sans", Arial, sans-serif; } .flow { fill: none; stroke: #263238; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }</style>
   </defs>
-
-  <rect width="1800" height="950" rx="28" fill="url(#page)"/>
-  <text x="55" y="58" class="title">MARS RFI mitigation pipeline</text>
-  <text x="55" y="92" class="subtitle">Generate the complete RFI mask first, apply it to the science data, then run post-processing.</text>
-
-  <!-- Swimlane backgrounds -->
-  <rect x="35" y="125" width="1730" height="130" rx="22" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
-  <rect x="35" y="275" width="1730" height="200" rx="22" fill="#ffffff" stroke="#bfdbfe" stroke-width="2"/>
-  <rect x="35" y="495" width="1730" height="175" rx="22" fill="#ffffff" stroke="#ddd6fe" stroke-width="2"/>
-  <rect x="35" y="690" width="1730" height="170" rx="22" fill="#ffffff" stroke="#bbf7d0" stroke-width="2"/>
-
-  <!-- Swimlane labels -->
-  <rect x="35" y="125" width="230" height="130" rx="22" fill="#334155"/>
-  <rect x="35" y="275" width="230" height="200" rx="22" fill="#2563eb"/>
-  <rect x="35" y="495" width="230" height="175" rx="22" fill="#7c3aed"/>
-  <rect x="35" y="690" width="230" height="170" rx="22" fill="#059669"/>
-
-  <text x="62" y="162" class="lane-number">01</text>
-  <text x="62" y="201" class="lane-title">Input &amp;</text>
-  <text x="62" y="230" class="lane-title">validation</text>
-
-  <text x="62" y="317" class="lane-number">02</text>
-  <text x="62" y="360" class="lane-title">RFI mask</text>
-  <text x="62" y="389" class="lane-title">generation</text>
-
-  <text x="62" y="537" class="lane-number">03</text>
-  <text x="62" y="580" class="lane-title">Mask</text>
-  <text x="62" y="609" class="lane-title">application</text>
-
-  <text x="62" y="732" class="lane-number">04</text>
-  <text x="62" y="775" class="lane-title">Post-</text>
-  <text x="62" y="804" class="lane-title">processing</text>
-
-  <!-- Input and validation -->
-  <g filter="url(#shadow)">
-    <rect x="335" y="145" width="280" height="90" rx="17" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
-    <rect x="735" y="145" width="310" height="90" rx="17" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
-    <rect x="1165" y="145" width="280" height="90" rx="17" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
+  <rect width="1800" height="1290" fill="white" />
+  <text x="60" y="69" font-size="40" font-weight="700" text-anchor="start" fill="#263238">MARS</text>
+  <text x="214" y="68" font-size="27" font-weight="400" text-anchor="start" fill="#263238">RFI mitigation processing flow</text>
+  <text x="1740" y="67" font-size="21" font-weight="400" text-anchor="end" fill="#58626b">Default configuration</text>
+  <line x1="60" y1="104" x2="1740" y2="104" stroke="#bcc2c7" stroke-width="1" />
+  <g id="input-group">
+    <rect x="60" y="180" width="1680" height="126" rx="20" fill="#f6f6f6" stroke="#263238" stroke-width="1.2" />
+    <text x="60" y="151" font-size="25" font-weight="600" text-anchor="start" fill="#263238">(a)  Input and segment preparation</text>
   </g>
-  <text x="475" y="182" class="node-title">SIGPROC filterbank</text>
-  <text x="475" y="209" class="node-copy">uint8 · channels × time</text>
-  <text x="890" y="182" class="node-title">Check &amp; preserve header</text>
-  <text x="890" y="209" class="node-copy">8-bit input · C ≥ 1</text>
-  <text x="1305" y="182" class="node-title">Load to GPU</text>
-  <text x="1305" y="209" class="node-copy">create two working branches</text>
-  <path d="M615 190 H725" class="arrow"/>
-  <path d="M1045 190 H1155" class="arrow"/>
-
-  <!-- Shared fork from the GPU input -->
-  <path d="M1305 235 V265 H280 V582 H340" class="branch"/>
-  <path d="M405 265 V315" class="branch"/>
-
-  <!-- Complete RFI-mask generation -->
-  <g filter="url(#shadow)">
-    <rect x="300" y="325" width="210" height="105" rx="17" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
-    <rect x="545" y="325" width="210" height="105" rx="17" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
-    <rect x="790" y="325" width="200" height="105" rx="17" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
-    <rect x="1025" y="325" width="210" height="105" rx="17" fill="#dbeafe" stroke="#2563eb" stroke-width="3"/>
-    <rect x="1270" y="325" width="230" height="105" rx="17" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
-    <rect x="1535" y="325" width="190" height="105" rx="17" fill="#f5f3ff" stroke="#7c3aed" stroke-width="3"/>
+  <g id="mask-group">
+    <rect x="60" y="420" width="1680" height="148" rx="20" fill="#f6f6f6" stroke="#263238" stroke-width="1.2" />
+    <text x="60" y="391" font-size="25" font-weight="600" text-anchor="start" fill="#263238">(b)  Neural mask generation</text>
   </g>
-  <text x="405" y="359" class="node-title-small">Normalize + small-C stack</text>
-  <text x="405" y="389" class="node-copy">median/MAD · C&lt;512</text>
-  <text x="405" y="412" class="node-copy">time slabs → virtual rows</text>
-
-  <text x="650" y="359" class="node-title-small">Input cleanup + tanh</text>
-  <text x="650" y="389" class="node-copy">blank / negative handling</text>
-  <text x="650" y="412" class="node-copy">bounded model input</text>
-
-  <text x="890" y="365" class="node-title-small">512 × 512 patches</text>
-  <text x="890" y="395" class="node-copy">split every segment</text>
-
-  <text x="1130" y="365" class="node-title">MARS FP16</text>
-  <text x="1130" y="395" class="node-copy">TensorRT inference</text>
-
-  <text x="1385" y="359" class="node-title-small">Threshold + reconstruct</text>
-  <text x="1385" y="389" class="node-copy">mask patches → segment</text>
-  <text x="1385" y="412" class="node-copy">restore full dimensions</text>
-
-  <text x="1630" y="358" class="node-title-small">Complete RFI mask</text>
-  <text x="1630" y="386" class="node-copy">NN + flagged channels</text>
-  <rect x="1568" y="400" width="124" height="20" rx="10" fill="#7c3aed"/>
-  <text x="1630" y="415" class="tag">MASK READY</text>
-
-  <path d="M510 377 H535" class="arrow"/>
-  <path d="M755 377 H780" class="arrow"/>
-  <path d="M990 377 H1015" class="arrow"/>
-  <path d="M1235 377 H1260" class="arrow"/>
-  <path d="M1500 377 H1525" class="arrow"/>
-
-  <!-- Mask application: science values and completed mask meet here -->
-  <g filter="url(#shadow)">
-    <rect x="350" y="535" width="330" height="95" rx="17" fill="#faf5ff" stroke="#7c3aed" stroke-width="2"/>
-    <rect x="915" y="535" width="350" height="95" rx="17" fill="#f5f3ff" stroke="#7c3aed" stroke-width="3"/>
+  <g id="replacement-group">
+    <rect x="60" y="706" width="1680" height="158" rx="20" fill="#f6f6f6" stroke="#263238" stroke-width="1.2" />
+    <text x="60" y="677" font-size="25" font-weight="600" text-anchor="start" fill="#263238">(c)  Mask-guided replacement</text>
   </g>
-  <text x="515" y="571" class="node-title">Science-data preparation</text>
-  <text x="515" y="600" class="node-copy">separate per-channel mean/std branch</text>
-  <text x="1090" y="571" class="node-title">Mask-guided replacement</text>
-  <text x="1090" y="600" class="node-copy">complete mask + science data · zero fill</text>
-  <path d="M680 582 H905" class="arrow"/>
-  <path d="M1630 430 V485 H1090 V525" class="mask-link"/>
-
-  <!-- Serial post-processing after replacement -->
-  <g filter="url(#shadow)">
-    <rect x="325" y="730" width="250" height="90" rx="17" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
-    <rect x="660" y="730" width="250" height="90" rx="17" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
-    <rect x="995" y="730" width="250" height="90" rx="17" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
-    <rect x="1330" y="730" width="330" height="90" rx="17" fill="#d1fae5" stroke="#059669" stroke-width="3"/>
+  <g id="postprocessing-group">
+    <rect x="60" y="986" width="1680" height="146" rx="20" fill="#f6f6f6" stroke="#263238" stroke-width="1.2" />
+    <text x="60" y="957" font-size="25" font-weight="600" text-anchor="start" fill="#263238">(d)  Post-processing and output</text>
   </g>
-  <text x="450" y="767" class="node-title">Zero-DM projection</text>
-  <text x="450" y="794" class="node-copy">zDot after replacement</text>
-  <text x="785" y="767" class="node-title">Baseline removal</text>
-  <text x="785" y="794" class="node-copy">1 s time window</text>
-  <text x="1120" y="767" class="node-title">Block rescale</text>
-  <text x="1120" y="794" class="node-copy">uint8 · μ=128 · σ=6</text>
-  <text x="1495" y="767" class="node-title">Write cleaned filterbank</text>
-  <text x="1495" y="794" class="node-copy">preserved SIGPROC header</text>
-  <path d="M1090 630 V700 H450 V720" class="arrow"/>
-  <path d="M575 775 H650" class="arrow"/>
-  <path d="M910 775 H985" class="arrow"/>
-  <path d="M1245 775 H1320" class="arrow"/>
-
-  <!-- Compact legend -->
-  <line x1="430" y1="905" x2="505" y2="905" stroke="#334155" stroke-width="4"/>
-  <text x="620" y="911" class="node-copy">science-data flow</text>
-  <line x1="850" y1="905" x2="925" y2="905" stroke="#7c3aed" stroke-width="4" stroke-dasharray="11 8"/>
-  <text x="1105" y="911" class="node-copy">completed mask controls replacement</text>
+  <path d="M1127.5 282 V337 H30 V781 H100" class="flow" marker-end="url(#arrow)" id="science-branch" />
+  <path d="M30 492 H100" class="flow" marker-end="url(#arrow)" id="neural-input-branch" />
+  <circle cx="30" cy="492" r="3.4" fill="#263238" />
+  <text x="70" y="329" font-size="18" font-weight="400" text-anchor="start" fill="#58626b">Raw segment samples</text>
+  <g id="input-filterbank">
+    <rect x="100" y="204" width="310" height="78" rx="9" fill="#dceaf3" stroke="#263238" stroke-width="1.5" />
+    <text x="255.0" y="236.0" font-size="21" font-weight="600" text-anchor="middle" fill="#263238">SIGPROC filterbank</text>
+    <text x="255.0" y="266.0" font-size="18" font-weight="400" text-anchor="middle" fill="#263238">8-bit · C × T samples</text>
+  </g>
+  <g id="validate-load">
+    <rect x="510" y="204" width="330" height="78" rx="9" fill="#dceaf3" stroke="#263238" stroke-width="1.5" />
+    <text x="675.0" y="236.0" font-size="21" font-weight="600" text-anchor="middle" fill="#263238">Validate and load</text>
+    <text x="675.0" y="266.0" font-size="17" font-weight="400" text-anchor="middle" fill="#263238">C ≥ 1 · retain header · GPU</text>
+  </g>
+  <g id="define-segments">
+    <rect x="945" y="204" width="365" height="78" rx="9" fill="#dceaf3" stroke="#263238" stroke-width="1.5" />
+    <text x="1127.5" y="236.0" font-size="20" font-weight="600" text-anchor="middle" fill="#263238">Define processing segments</text>
+    <text x="1127.5" y="266.0" font-size="18" font-weight="400" text-anchor="middle" fill="#263238">4 s target · patch-aligned</text>
+  </g>
+  <g id="channel-flags">
+    <rect x="1410" y="204" width="300" height="78" rx="9" fill="#f5dfbc" stroke="#263238" stroke-width="1.5" />
+    <text x="1560.0" y="236.0" font-size="21" font-weight="600" text-anchor="middle" fill="#263238">Channel flags</text>
+    <text x="1560.0" y="266.0" font-size="16" font-weight="400" text-anchor="middle" fill="#263238">Dead / saturated / persistent</text>
+  </g>
+  <path d="M410 243 H510" class="flow" marker-end="url(#arrow)" />
+  <path d="M840 243 H945" class="flow" marker-end="url(#arrow)" />
+  <path d="M1310 243 H1410" class="flow" marker-end="url(#arrow)" />
+  <path d="M1560 282 V321 H1768 V781 H1710" class="flow" marker-end="url(#arrow)" stroke-dasharray="7 6" id="flags-to-combination" />
+  <g id="robust-normalization">
+    <rect x="100" y="440" width="240" height="104" rx="9" fill="#dceaf3" stroke="#263238" stroke-width="1.5" />
+    <text x="220.0" y="471" font-size="17.5" font-weight="600" text-anchor="middle" fill="#263238">Robust normalization</text>
+    <text x="220.0" y="498" font-size="16" font-weight="400" text-anchor="middle" fill="#263238">Per-channel median / MAD</text>
+    <text x="220.0" y="522" font-size="16" font-weight="400" text-anchor="middle" fill="#263238">with std fallback</text>
+  </g>
+  <path d="M340 492 H374" class="flow" marker-end="url(#arrow)" />
+  <g id="condition-input">
+    <rect x="374" y="440" width="240" height="104" rx="9" fill="#dceaf3" stroke="#263238" stroke-width="1.5" />
+    <text x="494.0" y="471" font-size="20" font-weight="600" text-anchor="middle" fill="#263238">Condition input</text>
+    <text x="494.0" y="498" font-size="17" font-weight="400" text-anchor="middle" fill="#263238">Blank / negative handling</text>
+    <text x="494.0" y="522" font-size="17" font-weight="400" text-anchor="middle" fill="#263238">tanh compression</text>
+  </g>
+  <path d="M614 492 H648" class="flow" marker-end="url(#arrow)" />
+  <g id="build-patches">
+    <rect x="648" y="440" width="240" height="104" rx="9" fill="#dceaf3" stroke="#263238" stroke-width="1.5" />
+    <text x="768.0" y="471" font-size="19" font-weight="600" text-anchor="middle" fill="#263238">Build model patches</text>
+    <text x="768.0" y="498" font-size="16" font-weight="400" text-anchor="middle" fill="#263238">512 × 512 inputs</text>
+    <text x="768.0" y="522" font-size="16" font-weight="400" text-anchor="middle" fill="#263238">Stack time slabs if C &lt; 512</text>
+  </g>
+  <path d="M888 492 H922" class="flow" marker-end="url(#arrow)" />
+  <g id="model-inference">
+    <rect x="922" y="440" width="240" height="104" rx="9" fill="#e5def2" stroke="#263238" stroke-width="1.5" />
+    <text x="1042.0" y="471" font-size="22" font-weight="600" text-anchor="middle" fill="#263238">MARS · FP16</text>
+    <text x="1042.0" y="498" font-size="15.5" font-weight="400" text-anchor="middle" fill="#263238">PyTorch / verified TensorRT</text>
+    <text x="1042.0" y="522" font-size="15.5" font-weight="400" text-anchor="middle" fill="#263238">Predict mask logits</text>
+  </g>
+  <path d="M1162 492 H1196" class="flow" marker-end="url(#arrow)" />
+  <g id="threshold-hysteresis">
+    <rect x="1196" y="440" width="240" height="104" rx="9" fill="#e5def2" stroke="#263238" stroke-width="1.5" />
+    <text x="1316.0" y="471" font-size="17" font-weight="600" text-anchor="middle" fill="#263238">Threshold + hysteresis</text>
+    <text x="1316.0" y="498" font-size="16" font-weight="400" text-anchor="middle" fill="#263238">Seed 0.5 · support 0.15</text>
+    <text x="1316.0" y="522" font-size="16" font-weight="400" text-anchor="middle" fill="#263238">Per-patch mask prediction</text>
+  </g>
+  <path d="M1436 492 H1470" class="flow" marker-end="url(#arrow)" />
+  <g id="reconstruct-mask">
+    <rect x="1470" y="440" width="240" height="104" rx="9" fill="#e5def2" stroke="#263238" stroke-width="1.5" />
+    <text x="1590.0" y="471" font-size="21" font-weight="600" text-anchor="middle" fill="#263238">Restore mask</text>
+    <text x="1590.0" y="498" font-size="16.5" font-weight="400" text-anchor="middle" fill="#263238">Restore native C × T grid</text>
+    <text x="1590.0" y="522" font-size="16.5" font-weight="400" text-anchor="middle" fill="#263238">Invert small-C packing</text>
+  </g>
+  <path d="M1590 544 V726" class="flow" marker-end="url(#arrow)" stroke-dasharray="7 6" id="neural-mask-to-combination" />
+  <text x="1573" y="622" font-size="17" font-weight="400" text-anchor="end" fill="#58626b">Neural mask</text>
+  <text x="1747" y="690" font-size="17" font-weight="400" text-anchor="end" fill="#58626b">Channel flags</text>
+  <g id="science-preparation">
+    <rect x="100" y="726" width="430" height="110" rx="9" fill="#dceaf3" stroke="#263238" stroke-width="1.5" />
+    <text x="315.0" y="757" font-size="22" font-weight="600" text-anchor="middle" fill="#263238">Prepare science samples</text>
+    <text x="315.0" y="784" font-size="19" font-weight="400" text-anchor="middle" fill="#263238">Per-channel mean / std</text>
+    <text x="315.0" y="808" font-size="19" font-weight="400" text-anchor="middle" fill="#263238">Retain native C × T coordinates</text>
+  </g>
+  <g id="mask-guided-replacement">
+    <rect x="695" y="726" width="475" height="110" rx="9" fill="#dfebce" stroke="#263238" stroke-width="1.5" />
+    <text x="932.5" y="757" font-size="22" font-weight="600" text-anchor="middle" fill="#263238">Mask-guided replacement</text>
+    <text x="932.5" y="784" font-size="18" font-weight="400" text-anchor="middle" fill="#263238">Local Gaussian fill from clean samples</text>
+    <text x="932.5" y="808" font-size="18" font-weight="400" text-anchor="middle" fill="#263238">Fallback to normalized mean if needed</text>
+  </g>
+  <g id="combine-segment-mask">
+    <rect x="1340" y="726" width="370" height="110" rx="9" fill="#dfebce" stroke="#263238" stroke-width="1.5" />
+    <text x="1525.0" y="757" font-size="21" font-weight="600" text-anchor="middle" fill="#263238">Combine segment masks</text>
+    <text x="1525.0" y="784" font-size="18" font-weight="400" text-anchor="middle" fill="#263238">NN + flagged channels</text>
+    <text x="1525.0" y="808" font-size="18" font-weight="400" text-anchor="middle" fill="#263238">Channel occupancy flag &gt; 0.15</text>
+  </g>
+  <path d="M530 781 H695" class="flow" marker-end="url(#arrow)" id="science-to-replacement" />
+  <text x="612.5" y="767" font-size="16" font-weight="400" text-anchor="middle" fill="#58626b">Science values</text>
+  <path d="M1340 781 H1170" class="flow" marker-end="url(#arrow)" stroke-dasharray="7 6" id="mask-to-replacement" />
+  <text x="1255" y="767" font-size="17" font-weight="400" text-anchor="middle" fill="#58626b">Mask</text>
+  <path d="M932.5 836 V916 H30 V1059 H100" class="flow" marker-end="url(#arrow)" id="replacement-to-postprocessing" />
+  <g id="zero-dm-projection">
+    <rect x="100" y="1010" width="310" height="98" rx="9" fill="#f5dfbc" stroke="#263238" stroke-width="1.5" />
+    <text x="255.0" y="1052.0" font-size="21" font-weight="600" text-anchor="middle" fill="#263238">Zero-DM projection</text>
+    <text x="255.0" y="1082.0" font-size="18" font-weight="400" text-anchor="middle" fill="#263238">zDot after replacement</text>
+  </g>
+  <g id="baseline-removal">
+    <rect x="520" y="1010" width="310" height="98" rx="9" fill="#f5dfbc" stroke="#263238" stroke-width="1.5" />
+    <text x="675.0" y="1052.0" font-size="21" font-weight="600" text-anchor="middle" fill="#263238">Baseline removal</text>
+    <text x="675.0" y="1082.0" font-size="17" font-weight="400" text-anchor="middle" fill="#263238">1 s running-median window</text>
+  </g>
+  <g id="block-rescale">
+    <rect x="940" y="1010" width="310" height="98" rx="9" fill="#f5dfbc" stroke="#263238" stroke-width="1.5" />
+    <text x="1095.0" y="1052.0" font-size="21" font-weight="600" text-anchor="middle" fill="#263238">Block rescale → uint8</text>
+    <text x="1095.0" y="1082.0" font-size="18" font-weight="400" text-anchor="middle" fill="#263238">Targets: μ = 128, σ = 6</text>
+  </g>
+  <g id="write-filterbank">
+    <rect x="1360" y="1010" width="350" height="98" rx="9" fill="#dfebce" stroke="#263238" stroke-width="1.5" />
+    <text x="1535.0" y="1052.0" font-size="21" font-weight="600" text-anchor="middle" fill="#263238">Write cleaned filterbank</text>
+    <text x="1535.0" y="1082.0" font-size="18" font-weight="400" text-anchor="middle" fill="#263238">Preserve SIGPROC header</text>
+  </g>
+  <path d="M410 1059 H520" class="flow" marker-end="url(#arrow)" />
+  <path d="M830 1059 H940" class="flow" marker-end="url(#arrow)" />
+  <path d="M1250 1059 H1360" class="flow" marker-end="url(#arrow)" />
+  <path d="M80 1190 H156" class="flow" marker-end="url(#arrow)" />
+  <text x="178" y="1196" font-size="19" font-weight="400" text-anchor="start" fill="#263238">Sample / prediction flow</text>
+  <path d="M650 1190 H726" class="flow" marker-end="url(#arrow)" stroke-dasharray="7 6" />
+  <text x="748" y="1196" font-size="19" font-weight="400" text-anchor="start" fill="#263238">Mask / flag dependency</text>
+  <text x="60" y="1253" font-size="18" font-weight="400" text-anchor="start" fill="#58626b">C × T = channels × time. Segment masks are reconstructed and applied in the native science grid.</text>
+  <text x="1740" y="1253" font-size="18" font-weight="400" text-anchor="end" fill="#58626b">Full observation remains GPU-resident.</text>
 </svg>

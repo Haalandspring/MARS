@@ -158,9 +158,12 @@ PyTorch FP16 path, set `tensorrt_path` back to `null`.
 
 ## Processing flow
 
-The four swimlanes show the actual execution order: MARS first generates and
-reconstructs the complete RFI mask, applies that mask to the separately prepared
-science data, and only then runs zDot, baseline removal, and output rescaling.
+The diagram shows the supplied `config.json` profile. Separate branches prepare
+the neural-network inputs and science samples. Predicted masks are restored to
+each segment's native coordinates, combined with channel flags, and applied
+during local-Gaussian replacement. Post-replacement zDot, baseline removal,
+block rescaling, and filterbank output follow. Reconstruction and replacement
+are performed per segment; storing a full-observation mask is optional.
 Select the figure to open the full-size SVG.
 
 [![MARS RFI mitigation pipeline](pipeline.svg)](pipeline.svg)
