@@ -171,7 +171,10 @@ The production model is the paper `TRTShapeUNet512` configuration: four encoder
 widths `[8, 16, 32, 64]`, morphology-aware context, additive skip connections,
 and horizontal/vertical refinement at every decoder scale. It has 270,769
 trainable parameters. The U-shaped diagram makes spatial scales, additive skip
-connections, and decoder morphology refinement explicit.
+connections, and decoder morphology refinement explicit. The insets expand the
+three-branch morphology context and the horizontal and vertical residual
+refinements. The network head outputs logits; thresholding and optional
+hysteresis are performed by the mitigation pipeline.
 
 [![MARS morphology-aware U-Net model](model.svg)](model.svg)
 
