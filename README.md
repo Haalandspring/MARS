@@ -23,11 +23,11 @@ git clone https://github.com/Haalandspring/MARS.git
 cd MARS
 ```
 
-The development branch changes over time. A frozen Zenodo release with a
-version-specific DOI is being prepared; no archival DOI is recorded in this
-repository yet. See [RELEASING.md](RELEASING.md) for the publication procedure.
-Once published, the archived release should be used and cited when referring
-to that version of the pipeline.
+The frozen [v0.1.0 release](https://github.com/Haalandspring/MARS/releases/tag/v0.1.0)
+is archived on Zenodo with the version-specific DOI
+[10.5281/zenodo.22857994](https://doi.org/10.5281/zenodo.22857994).
+Use this archived copy when referring to version 0.1.0; the development branch
+continues to change. See [RELEASING.md](RELEASING.md) for the archival procedure.
 
 ## Setup
 
@@ -230,10 +230,15 @@ version-specific DOI. A GitHub URL provides access to ongoing development;
 the archived version's DOI identifies the frozen software being cited.
 
 [`CITATION.cff`](CITATION.cff) contains the software title, version, full author
-names, affiliations, and ORCIDs. It is the metadata source for GitHub's
-"Cite this repository" feature and Zenodo's GitHub integration. Until the
-archive is published and its DOI added, the generated citation is provisional.
-See [PUBLICATION.md](PUBLICATION.md) for manuscript and data-editor response
-templates to complete after publication.
+names, affiliations, ORCIDs, and the version-specific DOI. It is the metadata
+source for GitHub's "Cite this repository" feature and Zenodo's GitHub
+integration. Cite this release as:
+
+> Gong, Z., White, J., Roy, J., & Armour, W. (2026).
+> MARS: Morphology-Aware RFI Segmentation (v0.1.0) [Software]. Zenodo.
+> https://doi.org/10.5281/zenodo.22857994
+
+See [PUBLICATION.md](PUBLICATION.md) for the manuscript availability statement,
+BibTeX entry, and data-editor response template.
 
 MARS is released under the [MIT License](LICENSE).

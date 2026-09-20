@@ -4,7 +4,13 @@ The public development repository is <https://github.com/Haalandspring/MARS>.
 A GitHub repository alone does not provide the frozen DOI-bearing copy
 requested by the data editor. Follow this procedure to publish that copy.
 Version `0.1.0` is the current version in `CITATION.cff` and
-`src/mars_rfi/__init__.py`; a Zenodo DOI has not yet been recorded here.
+`src/mars_rfi/__init__.py`. It was published on 2026-09-20 as
+[GitHub release v0.1.0](https://github.com/Haalandspring/MARS/releases/tag/v0.1.0)
+and archived at [10.5281/zenodo.22857994](https://doi.org/10.5281/zenodo.22857994).
+The fixed release commit is `0a16ead1048fa299f5cdfaa0bdff3116e75a0684`.
+Examples below refer to this release; use a new version and tag for subsequent
+releases. Citation updates on the development branch do not move the published
+tag or change the archived files.
 
 ## Prepare the release
 
