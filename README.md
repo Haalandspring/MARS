@@ -12,6 +12,23 @@ The script predicts an RFI mask, replaces contaminated samples, applies the
 configured zero-DM projection and baseline removal, rescales the data, and
 writes a cleaned filterbank while preserving the SIGPROC header contract.
 
+## Obtain MARS
+
+The source code and trained checkpoint are publicly available at
+[github.com/Haalandspring/MARS](https://github.com/Haalandspring/MARS)
+under the [MIT License](LICENSE). Obtain a working copy with:
+
+```bash
+git clone https://github.com/Haalandspring/MARS.git
+cd MARS
+```
+
+The development branch changes over time. A frozen Zenodo release with a
+version-specific DOI is being prepared; no archival DOI is recorded in this
+repository yet. See [RELEASING.md](RELEASING.md) for the publication procedure.
+Once published, the archived release should be used and cited when referring
+to that version of the pipeline.
+
 ## Setup
 
 The validated environment is Linux x86-64, Python 3.13, and an NVIDIA GPU with
@@ -40,6 +57,11 @@ artifacts/checkpoints/mars-paper-historical/best_f1.pt
 Its SHA-256 is
 `3acf3997bd83a8836e512974a2093bce319ede7f47ce3868757df545c4bd69a4`.
 After installing the dependencies, run MARS directly from the repository:
+
+For the first run, set `"tensorrt_path": null` in `config.json` to use the
+included PyTorch checkpoint. The supplied configuration points to a locally
+compiled TensorRT engine, which is not distributed in the repository. To use
+TensorRT, first follow the [compilation instructions](#tensorrt-fp16) below.
 
 ```bash
 python mars.py \
@@ -188,5 +210,18 @@ benchmark results—are local-only and excluded from the public Git repository.
 
 ## Citation and license
 
-Citation metadata is provided in [`CITATION.cff`](CITATION.cff). MARS is
-released under the [MIT License](LICENSE).
+When using MARS in research, cite the **specific archived software version**
+used in the analysis and the
+[MARS paper](https://arxiv.org/abs/2608.05546). The software reference should
+identify the authors, title, version, Zenodo as the repository, and the
+version-specific DOI. A GitHub URL provides access to ongoing development;
+the archived version's DOI identifies the frozen software being cited.
+
+[`CITATION.cff`](CITATION.cff) contains the software title, version, full author
+names, affiliations, and ORCIDs. It is the metadata source for GitHub's
+"Cite this repository" feature and Zenodo's GitHub integration. Until the
+archive is published and its DOI added, the generated citation is provisional.
+See [PUBLICATION.md](PUBLICATION.md) for manuscript and data-editor response
+templates to complete after publication.
+
+MARS is released under the [MIT License](LICENSE).

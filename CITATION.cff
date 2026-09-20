@@ -1,17 +1,46 @@
 cff-version: 1.2.0
-message: "If you use MARS, please cite the associated paper and this software."
+message: >-
+  If you use MARS, please cite the specific archived software version you used
+  as well as the associated paper. See README.md for availability and
+  RELEASING.md for the Zenodo archival procedure.
 title: "MARS: Morphology-Aware RFI Segmentation"
 type: software
 version: 0.1.0
-date-released: 2026-08-02
+# Add date-released on publication and doi after Zenodo assigns the version DOI.
+# Do not use the all-versions concept DOI for a version-specific citation.
 license: MIT
 repository-code: "https://github.com/Haalandspring/MARS"
+url: "https://github.com/Haalandspring/MARS"
+abstract: >-
+  MARS (Morphology-Aware RFI Segmentation) provides a lightweight neural
+  network and a GPU-based pipeline for radio-frequency interference
+  segmentation and mask-guided mitigation of 8-bit SIGPROC filterbank
+  observations. The repository includes the inference source, configuration,
+  trained checkpoint, dependency specifications, and TensorRT compilation
+  and verification code.
+keywords:
+  - radio astronomy
+  - radio-frequency interference
+  - segmentation
+  - pulsars
+  - fast radio bursts
+  - GPU computing
+# Names, author order, affiliations, and ORCIDs match the MARS preprint:
+# https://arxiv.org/html/2608.05546v1
 authors:
   - family-names: Gong
     given-names: Zhaocheng
+    affiliation: "University of Oxford, Department of Engineering Science, Oxford e-Research Centre"
+    orcid: "https://orcid.org/0009-0002-6946-7541"
   - family-names: White
     given-names: Jack
+    affiliation: "University of Oxford, Department of Engineering Science, Oxford e-Research Centre"
+    orcid: "https://orcid.org/0000-0003-2690-6858"
   - family-names: Roy
     given-names: Jayanta
+    affiliation: "National Centre for Radio Astrophysics (NCRA), Pune, India"
+    orcid: "https://orcid.org/0000-0002-2892-8025"
   - family-names: Armour
     given-names: Wesley
+    affiliation: "University of Oxford, Department of Engineering Science, Oxford e-Research Centre"
+    orcid: "https://orcid.org/0000-0003-1756-3064"

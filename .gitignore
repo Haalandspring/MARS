@@ -10,6 +10,8 @@
 !/README.md
 !/LICENSE
 !/CITATION.cff
+!/RELEASING.md
+!/PUBLICATION.md
 !/pipeline.svg
 !/model.svg
 !/mars.py
@@ -39,3 +41,10 @@
 !/src/mars_rfi/pipeline.py
 !/src/mars_rfi/preprocess.py
 !/src/mars_rfi/provenance.py
+
+# LEONET research is local-only and must not enter public releases.
+# Keep these exclusions after the allowlist. Match files and directories at
+# any depth, including mixed-case names and bundled copies of experiments.
+*[Ll][Ee][Oo][Nn][Ee][Tt]*
+/ts128_codex_supplement_*
+/README_FILTOOL_PRESTO_TS128_REPRODUCTION.md
