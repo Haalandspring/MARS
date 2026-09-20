@@ -238,7 +238,7 @@ source for GitHub's "Cite this repository" feature and Zenodo's GitHub
 integration. Cite this release as:
 
 > Gong, Z., White, J., Roy, J., & Armour, W. (2026).
-> MARS: Morphology-Aware RFI Segmentation (v0.1.0) [Software]. Zenodo.
+> MARS: A Lightweight Morphology-Aware RFI Segmentation Network for Mask-Guided Mitigation in Radio Astronomy (v0.1.0) [Software]. Zenodo.
 > https://doi.org/10.5281/zenodo.22857994
 
 See [PUBLICATION.md](PUBLICATION.md) for the manuscript availability statement,

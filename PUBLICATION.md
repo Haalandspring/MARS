@@ -47,14 +47,15 @@ Also add `MARS \citep{mars_software}` to the manuscript's existing
 ## Software reference-list entry
 
 The [Zenodo BibTeX export](https://zenodo.org/records/22857994/export/bibtex)
-uses an `@software` entry. The following entry preserves its authors, title,
-version, year, and DOI while using `@misc` for traditional BibTeX styles.
+uses an `@software` entry. The following entry uses the full title shared with
+the arXiv paper and `@misc` for traditional BibTeX styles, retaining the
+software release's authors, version, year, and DOI.
 Insert it into the manuscript's `.bib` file:
 
 ```bibtex
 @misc{mars_software,
   author       = {Gong, Zhaocheng and White, Jack and Roy, Jayanta and Armour, Wesley},
-  title        = {{MARS}: Morphology-Aware {RFI} Segmentation},
+  title        = {{MARS}: A Lightweight Morphology-Aware {RFI} Segmentation Network for Mask-Guided Mitigation in Radio Astronomy},
   year         = {2026},
   howpublished = {Zenodo},
   note         = {Version v0.1.0, computer software},
