@@ -1,11 +1,12 @@
-# Fully locked MARS + TensorRT environment.
+# Locked MARS + TensorRT runtime dependencies.
 # Validated on Linux x86-64, Python 3.13, CUDA 13, and an NVIDIA GPU.
-# The NVIDIA driver is a system prerequisite and cannot be installed by pip.
+# Provide Python 3.13, Git, and a compatible NVIDIA GPU/driver separately.
+# Git must be on PATH to install sigpyproc from the fixed commit below.
+# The pinned NVIDIA wheels supply the required CUDA runtime libraries.
 
 # Direct MARS dependencies
 numpy==2.4.2
 torch==2.11.0
-tqdm==4.67.3
 sigpyproc @ git+https://github.com/FRBs/sigpyproc3@b31ef20fa13bb97e2caa244f65a4dfa377d6945a
 
 # ONNX export and TensorRT FP16 compilation/runtime
@@ -78,4 +79,5 @@ seaborn==0.13.2
 setuptools==81.0.0
 six==1.17.0
 sympy==1.14.0
+tqdm==4.67.3
 typing_extensions==4.16.0

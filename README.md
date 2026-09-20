@@ -32,20 +32,24 @@ to that version of the pipeline.
 ## Setup
 
 The validated environment is Linux x86-64, Python 3.13, and an NVIDIA GPU with
-a driver capable of CUDA 13. Create a clean environment, then install the exact
-tested MARS, ONNX, and TensorRT dependencies:
+a driver capable of CUDA 13. Git must also be installed and available on `PATH`,
+because `sigpyproc` is installed from a fixed Git commit. With Conda installed,
+create a clean environment, then install the exact tested MARS, ONNX, and
+TensorRT dependencies:
 
 ```bash
 conda create -n mars python=3.13 -y
 conda activate mars
 python -m pip install --upgrade pip wheel
 python -m pip install -r requirements.txt
+python -m pip check
 ```
 
 `requirements.txt` installs both execution paths: PyTorch FP16 inference and
 ONNX/TensorRT FP16 compilation. Direct and transitive package versions are
-locked to the clean environment used for the end-to-end checks. The system
-NVIDIA driver is the only prerequisite that pip cannot install.
+locked to the clean environment used for the end-to-end checks. Python, Git,
+and the NVIDIA hardware and driver must be provided separately; the required
+CUDA runtime libraries are installed by the pinned NVIDIA wheels.
 
 The production checkpoint is included in the repository at the location already
 selected by `config.json`:
