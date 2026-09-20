@@ -1,5 +1,8 @@
 # Manuscript citation and data-editor response
 
+Associated paper:
+[MARS: A Lightweight Morphology-Aware RFI Segmentation Network for Mask-Guided Mitigation in Radio Astronomy](https://arxiv.org/abs/2608.05546).
+
 **Archive verified on 2026-09-20:** MARS v0.1.0 is published on Zenodo at
 [10.5281/zenodo.22857994](https://doi.org/10.5281/zenodo.22857994).
 The source is publicly accessible at <https://github.com/Haalandspring/MARS>.
@@ -41,7 +44,7 @@ verification code.
 Also add `MARS \citep{mars_software}` to the manuscript's existing
 `\software{...}` list, preserving the other software entries.
 
-## Reference-list entry
+## Software reference-list entry
 
 The [Zenodo BibTeX export](https://zenodo.org/records/22857994/export/bibtex)
 uses an `@software` entry. The following entry preserves its authors, title,

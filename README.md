@@ -1,5 +1,8 @@
 # MARS
 
+This repository accompanies the paper
+[MARS: A Lightweight Morphology-Aware RFI Segmentation Network for Mask-Guided Mitigation in Radio Astronomy](https://arxiv.org/abs/2608.05546).
+
 MARS (**M**orphology-**A**ware **R**FI **S**egmentation) removes radio-frequency
 interference from 8-bit SIGPROC filterbank observations. The public interface is
 one script and one configuration file:
