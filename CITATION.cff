@@ -6,7 +6,8 @@ message: >-
 title: "MARS: Morphology-Aware RFI Segmentation"
 type: software
 version: 0.1.0
-# Add date-released on publication and doi after Zenodo assigns the version DOI.
+date-released: 2026-09-20
+# Add doi after Zenodo assigns the version DOI.
 # Do not use the all-versions concept DOI for a version-specific citation.
 license: MIT
 repository-code: "https://github.com/Haalandspring/MARS"
