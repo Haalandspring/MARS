@@ -30,7 +30,7 @@ The frozen [v0.1.0 release](https://github.com/Haalandspring/MARS/releases/tag/v
 is archived on Zenodo with the version-specific DOI
 [10.5281/zenodo.22857994](https://doi.org/10.5281/zenodo.22857994).
 Use this archived copy when referring to version 0.1.0; the development branch
-continues to change. See [RELEASING.md](RELEASING.md) for the archival procedure.
+continues to change.
 
 ## Setup
 
@@ -241,7 +241,6 @@ integration. Cite this release as:
 > MARS: A Lightweight Morphology-Aware RFI Segmentation Network for Mask-Guided Mitigation in Radio Astronomy (v0.1.0) [Software]. Zenodo.
 > https://doi.org/10.5281/zenodo.22857994
 
-See [PUBLICATION.md](PUBLICATION.md) for the manuscript availability statement,
-BibTeX entry, and data-editor response template.
+Download the [BibTeX citation from Zenodo](https://zenodo.org/records/22857994/export/bibtex).
 
 MARS is released under the [MIT License](LICENSE).

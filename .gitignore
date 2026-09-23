@@ -10,8 +10,6 @@
 !/README.md
 !/LICENSE
 !/CITATION.cff
-!/RELEASING.md
-!/PUBLICATION.md
 !/pipeline.svg
 !/model.svg
 !/mars.py
@@ -41,6 +39,10 @@
 !/src/mars_rfi/pipeline.py
 !/src/mars_rfi/preprocess.py
 !/src/mars_rfi/provenance.py
+
+# Internal release procedures and manuscript-response material stay local.
+/RELEASING.md
+/PUBLICATION.md
 
 # LEONET research is local-only and must not enter public releases.
 # Keep these exclusions after the allowlist. Match files and directories at

@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: >-
   If you use MARS, please cite the specific archived software version you used
   as well as the associated paper. See README.md for availability and
-  RELEASING.md for the Zenodo archival procedure.
+  citation details.
 title: "MARS: A Lightweight Morphology-Aware RFI Segmentation Network for Mask-Guided Mitigation in Radio Astronomy"
 type: software
 version: 0.1.0
