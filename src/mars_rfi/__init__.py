@@ -15,7 +15,7 @@ _MITIGATION_EXPORTS = {"load_pipeline_config", "mitigate_filterbank"}
 
 __all__ = sorted(_MODEL_EXPORTS | _MITIGATION_EXPORTS)
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 def __getattr__(name: str):
