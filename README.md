@@ -119,8 +119,8 @@ validated low-FP mitigation profile: 4 s normalization segments, a
 at unit clean-noise scale, post-replacement `zdot`, baseline removal, and
 Filtool-style block rescaling.
 
-To use the same bounded-memory baseline path as the validation batch, add
-`--baseline-streaming`; its configured workspace is 4096 MiB. Streaming is
+For bounded-workspace baseline removal, add `--baseline-streaming`; its
+configured workspace is 4096 MiB. Streaming is
 numerically equivalent to the one-shot running median and only changes memory
 use and runtime.
 
@@ -212,16 +212,12 @@ mars.py                simple RFI mitigation entry point
 compile_tensorrt.py    config-driven FP16 TensorRT compiler and verifier
 config.json            all user-selectable mitigation options
 requirements.txt       runtime dependencies
-src/mars_rfi/          minimal runtime and TensorRT implementation
+src/mars_rfi/          inference and TensorRT implementation
 pipeline.svg           full-size mitigation swimlane diagram
 model.svg              full-size morphology-aware U-Net diagram
 artifacts/checkpoints/mars-paper-historical/best_f1.pt
                        production checkpoint required by mars.py
 ```
-
-All other directories—including search, training, tests, article validation,
-datasets, additional checkpoints, TensorRT binaries, generated filterbanks, and
-benchmark results—are local-only and excluded from the public Git repository.
 
 ## Citation and license
 
