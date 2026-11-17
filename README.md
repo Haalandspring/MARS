@@ -205,19 +205,6 @@ mask generation and is restored to `[128, 4000]` before the mask is applied.
 The current implementation loads the complete observation into the
 GPU-resident working set; it is not an out-of-core streaming implementation.
 
-## Repository layout
-
-```text
-mars.py                simple RFI mitigation entry point
-compile_tensorrt.py    config-driven FP16 TensorRT compiler and verifier
-config.json            all user-selectable mitigation options
-requirements.txt       runtime dependencies
-src/mars_rfi/          inference and TensorRT implementation
-pipeline.svg           full-size mitigation swimlane diagram
-model.svg              full-size morphology-aware U-Net diagram
-artifacts/checkpoints/mars-paper-historical/best_f1.pt
-                       production checkpoint required by mars.py
-```
 
 ## Citation and license
 
